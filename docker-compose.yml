@@ -1,0 +1,58 @@
+services:
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      # Pointing at the existing external Postgres server (187.127.150.252) —
+      # set DATABASE_URL directly in .env, no local db container is used.
+      DATABASE_URL: ${DATABASE_URL}
+      SECRET_KEY: ${SECRET_KEY:-change-this-to-a-long-random-string}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+      WHATSAPP_API_URL: ${WHATSAPP_API_URL:-}
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+      ADMIN_WHATSAPP_NUMBER: ${ADMIN_WHATSAPP_NUMBER:-}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8090,http://localhost:8095}
+      ENV: ${ENV:-production}
+    ports:
+      # host 8020 -> container 8000; host 8000 is already used by another
+      # project (faceattendance-api-1) on this machine
+      - "8020:8000"
+    volumes:
+      # uploaded product/category/brand images — without this volume, every
+      # image uploaded through the admin panel is lost when the container
+      # restarts (it's just a directory inside the container filesystem
+      # otherwise, which docker throws away on rebuild)
+      - pillpoints_uploads:/app/uploads
+
+  admin:
+    build:
+      context: ./admin
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8020}
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      # host 8090 -> container 80; host 8080 is already used by another
+      # project (vorpet_api) on this machine
+      - "8090:80"
+
+  storefront:
+    build:
+      context: ./storefront
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8020}
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8095:80"
+
+volumes:
+  pillpoints_uploads:
