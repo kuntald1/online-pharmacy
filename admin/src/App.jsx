@@ -28,7 +28,7 @@ import Settings from "./pages/Settings";
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={import.meta.env.PROD ? '/admin' : '/'}>
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<Login />} />
