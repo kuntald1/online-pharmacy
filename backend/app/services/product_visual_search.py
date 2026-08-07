@@ -26,18 +26,22 @@ logger = logging.getLogger("visual_search")
 MODEL = "claude-sonnet-5"
 
 VISUAL_SEARCH_PROMPT = """You are looking at a photo of a medicine, health product, or its packaging \
-(box, strip, bottle, label). Identify what product this is from what's visible.
+(box, strip, bottle, label). Packaging usually shows BOTH a brand name and a generic/salt name — \
+extract both separately, since a pharmacy catalog might be searchable by either one and we don't \
+know in advance which.
 
-Give a SHORT, concise name — the way it would appear as a catalog product name, e.g. \
-"Novaclav 625" or "Amoxycillin 650mg Capsule" — brand name and/or strength/pack size only. \
-Do NOT include a parenthetical explanation, generic/salt-name breakdown, or full description; \
-that level of detail makes the guess useless for a catalog search.
+- "brand_name_guess": the brand/trade name as printed, with strength/pack size if legible \
+  (e.g. "Novaclav 625", "Crocin 500mg"). Null if no brand name is visible (generic-only packaging).
+- "generic_name_guess": the generic/salt/composition name with strength (e.g. "Amoxycillin \
+  Clavulanate 625mg", "Paracetamol 500mg"). Null if not legible.
+
+Keep both SHORT — just the name and strength, not a full sentence or parenthetical explanation.
 
 Respond with ONLY a single JSON object, no markdown fences, no commentary:
-{"product_name_guess": "<short catalog-style name>", "confidence": "high|medium|low"}
+{"brand_name_guess": "<short name or null>", "generic_name_guess": "<short name or null>", "confidence": "high|medium|low"}
 
 If the photo doesn't show a medicine/health product clearly enough to identify, respond with:
-{"product_name_guess": null, "confidence": "low", "error": "brief reason"}
+{"brand_name_guess": null, "generic_name_guess": null, "confidence": "low", "error": "brief reason"}
 """
 
 
@@ -166,10 +170,33 @@ def _find_matches(db: Session, query: str, channels: list[PricingChannel], limit
 
 def identify_and_match(db: Session, file_bytes: bytes, content_type: str, channels: list[PricingChannel]) -> dict:
     data = _call_claude(file_bytes, content_type)
-    guess = data.get("product_name_guess")
-    matches = _find_matches(db, guess, channels) if guess else []
+    brand_guess = data.get("brand_name_guess")
+    generic_guess = data.get("generic_name_guess")
+
+    # Try brand first (usually more specific/distinctive), fall back to
+    # generic if the brand isn't in the catalog — this pharmacy's data might
+    # use either convention, and a box often shows both, so don't stop
+    # after only trying one of them.
+    matches = []
+    matched_via = None
+    if brand_guess:
+        matches = _find_matches(db, brand_guess, channels)
+        if matches:
+            matched_via = "brand"
+    if not matches and generic_guess:
+        matches = _find_matches(db, generic_guess, channels)
+        if matches:
+            matched_via = "generic"
+
+    logger.warning(f"[visual-search] brand={brand_guess!r} generic={generic_guess!r} matched_via={matched_via} count={len(matches)}")
+
+    # Prefer showing whichever guess actually found something; otherwise
+    # show the brand guess if there is one, else the generic one — always
+    # give the person *something* to see even when nothing matched.
+    display_guess = (brand_guess if matched_via == "brand" else generic_guess) or brand_guess or generic_guess
+
     return {
-        "product_name_guess": guess,
+        "product_name_guess": display_guess,
         "confidence": data.get("confidence") or "low",
         "error": data.get("error"),
         "matches": matches,
