@@ -13,11 +13,11 @@ import json
 import re
 
 from anthropic import Anthropic
-from sqlalchemy import and_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
-from app.models.catalog import Product, ProductPricing
+from app.models.catalog import Product, ProductPricing, Brand
 from app.models.enums import PricingChannel
 
 MODEL = "claude-sonnet-5"
@@ -93,13 +93,21 @@ def _clean_guess(text: str) -> str:
 
 def _find_matches(db: Session, query: str, channels: list[PricingChannel], limit: int = 8) -> list[Product]:
     """Word-based match (every word must appear somewhere in the product
-    name, in any order) rather than one whole-string substring match —
-    handles punctuation/spacing differences between how a photo guess reads
-    a name ('Novaclav-625') and how the catalog stores it ('Novaclav 625
-    Tablet 10's') without becoming fuzzy/phonetic matching. Same deliberate
-    non-fuzzy philosophy as prescription matching: a failure should stay
-    visible (few/no matches) rather than hidden behind a confident-looking
-    wrong match."""
+    name OR its linked brand name, in any order) rather than one
+    whole-string substring match against Product.name alone.
+
+    This catalog stores brand and product name separately (Product.brand_id
+    -> Brand.name) — a photo of the box very often reads the *brand*
+    ('Novaclav'), which may not appear anywhere in Product.name if that
+    field holds the generic/salt name instead ('Amoxycillin & Potassium
+    Clavulanate 625'). Searching only Product.name would then silently miss
+    a completely correct identification. Matching against either field
+    (per word) covers both brand-named and generic-named catalog
+    conventions without knowing in advance which one a given pharmacy uses.
+
+    Still deliberately non-fuzzy/non-phonetic — same philosophy as
+    prescription matching: a failure should stay visible (few/no matches)
+    rather than hidden behind a confident-looking wrong match."""
     query = _clean_guess(query) if query else query
     if not query or not query.strip():
         return []
@@ -108,10 +116,14 @@ def _find_matches(db: Session, query: str, channels: list[PricingChannel], limit
     if not words:
         return []
 
-    conditions = [Product.name.ilike(f"%{w}%") for w in words]
+    conditions = [
+        or_(Product.name.ilike(f"%{w}%"), Brand.name.ilike(f"%{w}%"))
+        for w in words
+    ]
     candidates = (
         db.query(Product)
         .join(ProductPricing)
+        .outerjoin(Brand, Product.brand_id == Brand.id)
         .options(joinedload(Product.pricing))
         .filter(
             Product.is_active == True,  # noqa: E712
