@@ -10,8 +10,10 @@ the wrong medicine, which is a real risk, not just an annoying miss.
 """
 import base64
 import json
+import re
 
 from anthropic import Anthropic
+from sqlalchemy import and_
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
@@ -21,11 +23,15 @@ from app.models.enums import PricingChannel
 MODEL = "claude-sonnet-5"
 
 VISUAL_SEARCH_PROMPT = """You are looking at a photo of a medicine, health product, or its packaging \
-(box, strip, bottle, label). Identify what product this is, as specifically as you can from \
-what's visible — brand name, generic/salt name, strength/dosage, and pack size if legible.
+(box, strip, bottle, label). Identify what product this is from what's visible.
+
+Give a SHORT, concise name — the way it would appear as a catalog product name, e.g. \
+"Novaclav 625" or "Amoxycillin 650mg Capsule" — brand name and/or strength/pack size only. \
+Do NOT include a parenthetical explanation, generic/salt-name breakdown, or full description; \
+that level of detail makes the guess useless for a catalog search.
 
 Respond with ONLY a single JSON object, no markdown fences, no commentary:
-{"product_name_guess": "<your best guess, e.g. 'Amoxycillin 650mg Capsule'>", "confidence": "high|medium|low"}
+{"product_name_guess": "<short catalog-style name>", "confidence": "high|medium|low"}
 
 If the photo doesn't show a medicine/health product clearly enough to identify, respond with:
 {"product_name_guess": null, "confidence": "low", "error": "brief reason"}
@@ -73,15 +79,36 @@ def _call_claude(file_bytes: bytes, content_type: str) -> dict:
     return data
 
 
+def _clean_guess(text: str) -> str:
+    """Defensive safety net independent of prompt compliance — strips
+    parenthetical detail and anything after a comma, since a verbose guess
+    (e.g. 'Novaclav-625 (Amoxycillin and Potassium Clavulanate Tablets IP,
+    625mg, 10's Pack)') will never substring-match a real catalog name like
+    'Novaclav 625 Tablet 10's', even when the identification itself was
+    completely correct."""
+    text = re.sub(r"\([^)]*\)", "", text)
+    text = text.split(",")[0]
+    return text.strip()
+
+
 def _find_matches(db: Session, query: str, channels: list[PricingChannel], limit: int = 8) -> list[Product]:
-    """Plain substring match against active products in the requested
-    channel(s) — same deliberate choice as prescription matching: no
-    fuzzy/phonetic matching layered on top of an already-uncertain visual
-    guess, so failures stay visible (few/no matches) instead of hidden
-    (a confident-looking wrong match)."""
+    """Word-based match (every word must appear somewhere in the product
+    name, in any order) rather than one whole-string substring match —
+    handles punctuation/spacing differences between how a photo guess reads
+    a name ('Novaclav-625') and how the catalog stores it ('Novaclav 625
+    Tablet 10's') without becoming fuzzy/phonetic matching. Same deliberate
+    non-fuzzy philosophy as prescription matching: a failure should stay
+    visible (few/no matches) rather than hidden behind a confident-looking
+    wrong match."""
+    query = _clean_guess(query) if query else query
     if not query or not query.strip():
         return []
-    like = f"%{query.strip()}%"
+
+    words = [w for w in re.split(r"[\s\-/]+", query.strip()) if w]
+    if not words:
+        return []
+
+    conditions = [Product.name.ilike(f"%{w}%") for w in words]
     candidates = (
         db.query(Product)
         .join(ProductPricing)
@@ -90,7 +117,7 @@ def _find_matches(db: Session, query: str, channels: list[PricingChannel], limit
             Product.is_active == True,  # noqa: E712
             ProductPricing.channel.in_(channels),
             ProductPricing.is_active == True,  # noqa: E712
-            Product.name.ilike(like),
+            and_(*conditions),
         )
         .distinct()
         .limit(limit)
