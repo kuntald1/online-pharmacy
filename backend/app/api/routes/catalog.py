@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
@@ -11,11 +11,12 @@ from app.schemas.catalog import (
     CategoryCreate, CategoryOut, CategoryUpdate, BrandCreate, BrandOut, BrandUpdate,
     ProductCreate, ProductOut, ProductUpdate, BannerCreate, BannerOut, BannerUpdate,
     ProductVariantOut, LinkVariantRequest, ManufacturerCreate, ManufacturerOut,
-    MarketerCreate, MarketerOut,
+    MarketerCreate, MarketerOut, VisualSearchOut,
 )
 import secrets
-from app.api.deps import require_admin, require_approved_b2b
+from app.api.deps import require_admin, require_approved_b2b, get_current_user
 from app.services import suggestions
+from app.services import product_visual_search
 
 router = APIRouter(prefix="/api", tags=["catalog"])
 
@@ -369,6 +370,51 @@ def list_products(
     for p in products:
         p.pricing = [pr for pr in p.pricing if pr.channel in channels]
     return products
+
+
+ALLOWED_VISUAL_SEARCH_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+MAX_VISUAL_SEARCH_SIZE = 15 * 1024 * 1024  # 15MB, matches the prescription-upload limit
+
+
+@router.post("/products/visual-search", response_model=VisualSearchOut)
+async def visual_search(
+    file: UploadFile = File(...),
+    channel: str = Query("b2c", pattern=CHANNEL_PATTERN, description="b2c, b2b (both tiers), or cnf"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Search the catalog from a photo of a product/package instead of typed
+    text. Mirrors /prescriptions/extract's shape and reasoning exactly: a
+    Claude vision call reads the packaging, the resulting name guess is run
+    through the same plain substring search the text box uses (no separate
+    fuzzy-matching path to keep behaviour predictable), and the person picks
+    from the matches — the guess is never auto-resolved to a single product.
+
+    Login is required for the same reason it's required on the prescription
+    endpoint: this call costs real money per request (Claude vision), so an
+    anonymous, unlimited-use endpoint is an abuse vector, not just a nice-to-have
+    convenience.
+    """
+    if file.content_type not in ALLOWED_VISUAL_SEARCH_TYPES:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {file.content_type}")
+
+    contents = await file.read()
+    if len(contents) > MAX_VISUAL_SEARCH_SIZE:
+        raise HTTPException(status_code=400, detail="File is too large (max 15MB)")
+
+    channels = _visible_channels_for(channel)
+
+    try:
+        result = product_visual_search.identify_and_match(db, contents, file.content_type, channels)
+    except product_visual_search.VisualSearchError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    return VisualSearchOut(
+        product_name_guess=result["product_name_guess"],
+        confidence=result["confidence"],
+        error=result["error"],
+        matches=result["matches"],
+    )
 
 
 @router.get("/products/{slug}", response_model=ProductOut)

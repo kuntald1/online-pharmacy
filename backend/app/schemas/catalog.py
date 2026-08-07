@@ -221,3 +221,11 @@ class BannerUpdate(BaseModel):
     position: str | None = None
     sort_order: int | None = None
     is_active: bool | None = None
+
+
+class VisualSearchOut(BaseModel):
+    product_name_guess: str | None = None
+    confidence: str = "low"  # high | medium | low — a photo guess is often genuinely ambiguous
+    error: str | None = None
+    matches: list[ProductOut] = []
+
