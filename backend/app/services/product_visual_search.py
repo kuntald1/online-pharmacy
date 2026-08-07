@@ -98,6 +98,9 @@ def _clean_guess(text: str) -> str:
     return text.strip()
 
 
+STOPWORDS = {"and", "with", "plus", "&", "the", "a", "an", "of", "for"}
+
+
 def _find_matches(db: Session, query: str, channels: list[PricingChannel], limit: int = 8) -> list[Product]:
     """Word-based match (every word must appear somewhere in the product
     name OR its linked brand name, in any order) rather than one
@@ -119,12 +122,48 @@ def _find_matches(db: Session, query: str, channels: list[PricingChannel], limit
     if not query or not query.strip():
         return []
 
-    words = [w for w in re.split(r"[\s\-/]+", query.strip()) if w]
+    all_words = [w for w in re.split(r"[\s\-/]+", query.strip()) if w]
+    # Grammatical filler ("and", "with", ...) is never how a product is
+    # actually identified — requiring it present, same as any other word,
+    # can silently block an otherwise-correct match just because "and"
+    # doesn't literally appear in a catalog name.
+    words = [w for w in all_words if w.lower() not in STOPWORDS] or all_words
     if not words:
         return []
 
     logger.warning(f"[visual-search] cleaned query={query!r} words={words} channels={channels}")
 
+    candidates = _run_word_match(db, words, channels, limit)
+
+    # If the exact word set (including strength, e.g. '625mg') found
+    # nothing, the strength on the box may simply differ from what this
+    # pharmacy stocks (a real, common case — not a bug). Retrying with just
+    # the drug-name words (dropping anything with a digit) surfaces a
+    # same-family product instead of a dead end; the person can still see
+    # it's a different strength and decide for themselves rather than
+    # getting nothing at all.
+    name_only_words = [w for w in words if not any(c.isdigit() for c in w)]
+
+    if not candidates and name_only_words and name_only_words != words:
+        logger.warning(f"[visual-search] retrying without strength: {name_only_words}")
+        candidates = _run_word_match(db, name_only_words, channels, limit)
+
+    # Last resort: just the single most prominent term (typically the
+    # primary drug name, e.g. 'Amoxycillin' out of 'Amoxycillin Potassium
+    # Clavulanate'). This catalog may simply not stock the exact
+    # combination/strength on the box at all — surfacing the closest
+    # same-family product beats a dead end, and it's still shown as a
+    # candidate to review, never auto-selected.
+    if not candidates and name_only_words:
+        primary_word = name_only_words[0]
+        if [primary_word] != name_only_words:
+            logger.warning(f"[visual-search] retrying with primary term only: {primary_word!r}")
+            candidates = _run_word_match(db, [primary_word], channels, limit)
+
+    return candidates
+
+
+def _run_word_match(db: Session, words: list[str], channels: list[PricingChannel], limit: int) -> list[Product]:
     conditions = [
         or_(Product.name.ilike(f"%{w}%"), Brand.name.ilike(f"%{w}%"))
         for w in words
