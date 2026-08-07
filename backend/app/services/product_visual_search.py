@@ -10,6 +10,7 @@ the wrong medicine, which is a real risk, not just an annoying miss.
 """
 import base64
 import json
+import logging
 import re
 
 from anthropic import Anthropic
@@ -19,6 +20,8 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.config import settings
 from app.models.catalog import Product, ProductPricing, Brand
 from app.models.enums import PricingChannel
+
+logger = logging.getLogger("visual_search")
 
 MODEL = "claude-sonnet-5"
 
@@ -116,6 +119,8 @@ def _find_matches(db: Session, query: str, channels: list[PricingChannel], limit
     if not words:
         return []
 
+    logger.warning(f"[visual-search] cleaned query={query!r} words={words} channels={channels}")
+
     conditions = [
         or_(Product.name.ilike(f"%{w}%"), Brand.name.ilike(f"%{w}%"))
         for w in words
@@ -135,6 +140,25 @@ def _find_matches(db: Session, query: str, channels: list[PricingChannel], limit
         .limit(limit)
         .all()
     )
+    logger.warning(f"[visual-search] found {len(candidates)} candidates: {[p.name for p in candidates]}")
+
+    # Diagnostic only, doesn't affect the response: if the strict AND-of-words
+    # search found nothing, check whether a name/brand match exists AT ALL
+    # (ignoring channel/active filters) — tells us in the logs whether this
+    # was a naming mismatch or a channel/active-status mismatch.
+    if not candidates:
+        any_name_hit = (
+            db.query(Product)
+            .outerjoin(Brand, Product.brand_id == Brand.id)
+            .filter(and_(*conditions))
+            .limit(5)
+            .all()
+        )
+        logger.warning(
+            f"[visual-search] zero results with channel/active filters — "
+            f"without those filters, name/brand match found: {[(p.name, p.is_active) for p in any_name_hit]}"
+        )
+
     for p in candidates:
         p.pricing = [pr for pr in p.pricing if pr.channel in channels]
     return candidates
