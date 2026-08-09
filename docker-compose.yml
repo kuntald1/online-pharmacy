@@ -28,7 +28,7 @@ services:
       # image uploaded through the admin panel is lost when the container
       # restarts (it's just a directory inside the container filesystem
       # otherwise, which docker throws away on rebuild)
-      - pillpoints_uploads:/app/uploads
+      - ./backend/uploads:/app/uploads
 
   admin:
     build:
