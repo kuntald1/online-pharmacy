@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { ArrowLeft, Heart, Share2, Check } from "lucide-react";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
+import { resolveImageUrl } from "../utils/media";
 import ImageMagnifier from "../components/ImageMagnifier";
 import SpotlightRow from "../components/SpotlightRow";
 import ReviewsSection from "../components/ReviewsSection";
@@ -130,7 +131,7 @@ export default function ProductDetail() {
     if (channel === "cnf") return p.channel === "cnf";
     return p.channel === "b2b_normal" || p.channel === "b2b_advance";
   });
-  const images = product.image_urls ? product.image_urls.split(",").filter(Boolean) : [];
+  const images = product.image_urls ? product.image_urls.split(",").filter(Boolean).map(resolveImageUrl) : [];
 
   return (
     <div className="min-h-screen flex flex-col bg-white">

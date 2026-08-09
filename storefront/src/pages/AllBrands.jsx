@@ -1,3 +1,4 @@
+import { resolveImageUrl } from "../utils/media";
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import Header from "../components/Header";
@@ -32,7 +33,7 @@ export default function AllBrands() {
             {brands.map((brand) => (
               <Link key={brand.id} to={`/${channelParam}/brand/${brand.slug}`} className="h-28 rounded-card border border-border overflow-hidden flex flex-col hover:border-teal transition-colors">
                 {brand.logo_url ? (
-                  <img src={brand.logo_url} alt={brand.name} className="h-20 w-full object-cover" />
+                  <img src={resolveImageUrl(brand.logo_url)} alt={brand.name} className="h-20 w-full object-cover" />
                 ) : (
                   <div className="h-20 w-full bg-bg flex items-center justify-center">
                     <span className="font-display font-semibold text-sm text-ink-soft">{brand.name}</span>

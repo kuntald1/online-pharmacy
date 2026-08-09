@@ -1,3 +1,4 @@
+import { resolveImageUrl } from "../utils/media";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
@@ -37,11 +38,11 @@ export default function PromoStrip({ channel }) {
               href={banner.link_url}
               className="block rounded-card overflow-hidden border border-border hover:shadow-card transition-shadow h-40"
             >
-              <img src={banner.image_url} alt={banner.title} className="h-full w-full object-cover" />
+              <img src={resolveImageUrl(banner.image_url)} alt={banner.title} className="h-full w-full object-cover" />
             </a>
           ) : (
             <div key={banner.id} className="rounded-card overflow-hidden border border-border h-40">
-              <img src={banner.image_url} alt={banner.title} className="h-full w-full object-cover" />
+              <img src={resolveImageUrl(banner.image_url)} alt={banner.title} className="h-full w-full object-cover" />
             </div>
           )
         )}

@@ -1,3 +1,4 @@
+import { resolveImageUrl } from "../utils/media";
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
@@ -53,7 +54,7 @@ export default function BrandProducts() {
             <div className="flex items-center gap-3 mb-6">
               {brand.logo_url && (
                 <div className="h-12 w-12 rounded-xl bg-bg border border-border flex items-center justify-center overflow-hidden shrink-0">
-                  <img src={brand.logo_url} alt="" className="h-full w-full object-cover" />
+                  <img src={resolveImageUrl(brand.logo_url)} alt="" className="h-full w-full object-cover" />
                 </div>
               )}
               <h1 className="font-display font-bold text-2xl text-ink">{brand.name}</h1>

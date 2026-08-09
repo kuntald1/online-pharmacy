@@ -1,3 +1,4 @@
+import { resolveImageUrl } from "../utils/media";
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { Heart } from "lucide-react";
@@ -71,7 +72,7 @@ export default function Wishlist() {
                   <Link to={`/${channel}/product/${p.slug}`} className="block">
                     <div className="h-28 rounded-lg bg-bg mb-3 overflow-hidden">
                       {p.image_url ? (
-                        <img src={p.image_url} alt={p.name} className="h-full w-full object-cover" />
+                        <img src={resolveImageUrl(p.image_url)} alt={p.name} className="h-full w-full object-cover" />
                       ) : (
                         <div className="h-full w-full flex items-center justify-center">
                           <span className="text-xs text-ink-soft">No image</span>

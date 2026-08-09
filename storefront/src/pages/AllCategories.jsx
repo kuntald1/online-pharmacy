@@ -1,3 +1,4 @@
+import { resolveImageUrl } from "../utils/media";
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { Package } from "lucide-react";
@@ -38,7 +39,7 @@ export default function AllCategories() {
               >
                 <div className="h-20 w-20 rounded-2xl bg-bg border border-border flex items-center justify-center overflow-hidden group-hover:border-teal transition-colors">
                   {cat.image_url ? (
-                    <img src={cat.image_url} alt="" className="h-full w-full object-cover" />
+                    <img src={resolveImageUrl(cat.image_url)} alt="" className="h-full w-full object-cover" />
                   ) : (
                     <Package size={26} className="text-teal" />
                   )}

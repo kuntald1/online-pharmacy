@@ -1,3 +1,4 @@
+import { resolveImageUrl } from "../utils/media";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Plus } from "lucide-react";
@@ -78,7 +79,7 @@ export default function FrequentlyBoughtTogether({ product, channel }) {
                 />
                 <div className="h-20 w-20 rounded-lg bg-bg overflow-hidden border border-border">
                   {it.image_url ? (
-                    <img src={it.image_url} alt={it.name} className="h-full w-full object-cover" />
+                    <img src={resolveImageUrl(it.image_url)} alt={it.name} className="h-full w-full object-cover" />
                   ) : (
                     <div className="h-full w-full flex items-center justify-center">
                       <span className="text-[10px] text-ink-soft">No image</span>

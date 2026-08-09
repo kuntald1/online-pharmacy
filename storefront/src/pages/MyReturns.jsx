@@ -5,7 +5,7 @@ import Footer from "../components/Footer";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../api/client";
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { resolveImageUrl } from "../utils/media";
 
 const STATUS_LABELS = {
   requested: "Requested", pickup_scheduled: "Pickup scheduled", picked_up: "Picked up",
@@ -73,7 +73,7 @@ export default function MyReturns() {
                 </div>
                 <p className="text-sm text-ink-soft mb-2">{r.reason}</p>
                 {r.image_url && (
-                  <img src={`${API_BASE}${r.image_url}`} alt="Return evidence" className="h-20 w-20 rounded-lg object-cover mb-2" />
+                  <img src={resolveImageUrl(r.image_url)} alt="Return evidence" className="h-20 w-20 rounded-lg object-cover mb-2" />
                 )}
                 {r.status === "approved" && (
                   <p className="text-sm text-teal-dark font-medium">

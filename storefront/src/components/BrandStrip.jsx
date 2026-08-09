@@ -1,3 +1,4 @@
+import { resolveImageUrl } from "../utils/media";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
@@ -39,7 +40,7 @@ export default function BrandStrip({ channel }) {
             className="h-28 rounded-card border border-border overflow-hidden hover:border-teal transition-colors flex flex-col"
           >
             {brand.logo_url ? (
-              <img src={brand.logo_url} alt={brand.name} className="h-20 w-full object-cover" />
+              <img src={resolveImageUrl(brand.logo_url)} alt={brand.name} className="h-20 w-full object-cover" />
             ) : (
               <div className="h-20 w-full bg-bg flex items-center justify-center">
                 <span className="font-display font-semibold text-sm text-ink-soft">{brand.name}</span>

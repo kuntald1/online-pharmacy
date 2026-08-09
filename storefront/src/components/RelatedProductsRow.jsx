@@ -1,3 +1,4 @@
+import { resolveImageUrl } from "../utils/media";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ChevronLeft, ChevronRight } from "lucide-react";
@@ -51,7 +52,7 @@ export default function RelatedProductsRow({ title, slug, channel, relationType 
             >
               <div className="h-28 rounded-lg bg-bg mb-3 overflow-hidden">
                 {p.image_url ? (
-                  <img src={p.image_url} alt={p.name} className="h-full w-full object-cover" />
+                  <img src={resolveImageUrl(p.image_url)} alt={p.name} className="h-full w-full object-cover" />
                 ) : (
                   <div className="h-full w-full flex items-center justify-center">
                     <span className="text-xs text-ink-soft">No image</span>

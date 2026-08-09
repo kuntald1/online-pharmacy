@@ -1,3 +1,4 @@
+import { resolveImageUrl } from "../utils/media";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Header from "../components/Header";
@@ -266,7 +267,7 @@ export default function Checkout() {
                   {summary.items.map((item) => (
                     <div key={item.item_id} className="flex items-center gap-3">
                       <div className="h-12 w-12 rounded-lg bg-bg overflow-hidden shrink-0">
-                        {item.image_url && <img src={item.image_url} alt="" className="h-full w-full object-cover" />}
+                        {item.image_url && <img src={resolveImageUrl(item.image_url)} alt="" className="h-full w-full object-cover" />}
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm text-ink truncate">{item.name}</p>

@@ -1,3 +1,4 @@
+import { resolveImageUrl } from "../utils/media";
 import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Eye } from "lucide-react";
 import { api } from "../api/client";
@@ -62,7 +63,7 @@ export default function HealthPackagesRow({ channel }) {
         {display.map((pkg) => (
           <div key={pkg._repeatKey} className="w-56 shrink-0 snap-start bg-white border border-border rounded-card p-3">
             <div className="relative h-40 rounded-lg overflow-hidden bg-bg mb-3">
-              <img src={pkg.image_url} alt={pkg.title} className="h-full w-full object-cover" />
+              <img src={resolveImageUrl(pkg.image_url)} alt={pkg.title} className="h-full w-full object-cover" />
               {pkg.is_popular && (
                 <span className="absolute top-2 right-2 bg-teal text-white text-[10px] font-semibold px-2.5 py-1 rounded-full">
                   POPULAR

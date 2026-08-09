@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { Search, ArrowRight } from "lucide-react";
+import { resolveImageUrl } from "../utils/media";
 
 export default function SearchSuggestions({ query, suggestions, loading, channel, onSelect, onViewAll }) {
   if (!query.trim()) return null;
@@ -23,7 +24,7 @@ export default function SearchSuggestions({ query, suggestions, loading, channel
                 >
                   <div className="h-9 w-9 rounded-md bg-bg overflow-hidden shrink-0">
                     {p.image_urls ? (
-                      <img src={p.image_urls.split(",")[0]} alt="" className="h-full w-full object-cover" />
+                      <img src={resolveImageUrl(p.image_urls.split(",")[0])} alt="" className="h-full w-full object-cover" />
                     ) : (
                       <Search size={14} className="text-ink-soft m-auto mt-2.5" />
                     )}

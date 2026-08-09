@@ -1,3 +1,4 @@
+import { resolveImageUrl } from "../utils/media";
 import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { api } from "../api/client";
@@ -55,7 +56,7 @@ export default function HeroSlider({ channel }) {
   return (
     <div className="relative h-64 sm:h-80 rounded-card overflow-hidden bg-bg">
       <a href={banner.link_url || "#"} className="block h-full w-full">
-        <img src={banner.image_url} alt={banner.title} className="h-full w-full object-cover" />
+        <img src={resolveImageUrl(banner.image_url)} alt={banner.title} className="h-full w-full object-cover" />
       </a>
 
       {/* Only rendered when the CMS field is actually filled in — an admin

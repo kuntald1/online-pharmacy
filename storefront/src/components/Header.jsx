@@ -1,3 +1,4 @@
+import { resolveImageUrl } from "../utils/media";
 import { useEffect, useState, useRef } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { Search, Heart, ShoppingCart, User, FileText, Tag, Package, ChevronDown, Menu, X, Minus, Plus, LogOut, ArrowRightLeft } from "lucide-react";
@@ -191,7 +192,7 @@ export default function Header({ onLogoClick }) {
                         {items.map((item) => (
                           <div key={item.key} className="flex gap-3 p-3">
                             <div className="h-14 w-14 rounded-lg bg-bg overflow-hidden shrink-0">
-                              {item.image && <img src={item.image} alt="" className="h-full w-full object-cover" />}
+                              {item.image && <img src={resolveImageUrl(item.image)} alt="" className="h-full w-full object-cover" />}
                             </div>
                             <div className="flex-1 min-w-0">
                               <p className="text-xs font-medium text-ink truncate">{item.name}</p>

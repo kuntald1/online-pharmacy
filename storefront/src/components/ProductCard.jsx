@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { useCart } from "../context/CartContext";
+import { resolveImageUrl } from "../utils/media";
 
 export default function ProductCard({ product, channel }) {
   const { addItem } = useCart();
@@ -33,7 +34,7 @@ export default function ProductCard({ product, channel }) {
         <div className={`h-28 rounded-lg bg-bg mb-3 overflow-hidden ${outOfStock ? "opacity-50" : ""}`}>
           {product.image_urls ? (
             <img
-              src={product.image_urls.split(",")[0]}
+              src={resolveImageUrl(product.image_urls.split(",")[0])}
               alt={product.name}
               className="h-full w-full object-cover transition-transform duration-300 hover:scale-110"
             />

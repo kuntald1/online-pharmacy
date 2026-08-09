@@ -1,3 +1,4 @@
+import { resolveImageUrl } from "../utils/media";
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import Header from "../components/Header";
@@ -38,7 +39,7 @@ export default function AllOffers() {
                 href={banner.link_url || "#"}
                 className="block rounded-card overflow-hidden border border-border hover:shadow-card transition-shadow h-40"
               >
-                <img src={banner.image_url} alt={banner.title} className="h-full w-full object-cover" />
+                <img src={resolveImageUrl(banner.image_url)} alt={banner.title} className="h-full w-full object-cover" />
               </a>
             ))}
           </div>

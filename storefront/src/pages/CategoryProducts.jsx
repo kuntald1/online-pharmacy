@@ -1,3 +1,4 @@
+import { resolveImageUrl } from "../utils/media";
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { ArrowLeft, Package } from "lucide-react";
@@ -56,7 +57,7 @@ export default function CategoryProducts() {
             <div className="flex items-center gap-3 mb-6">
               <div className="h-12 w-12 rounded-xl bg-bg border border-border flex items-center justify-center overflow-hidden shrink-0">
                 {category.image_url ? (
-                  <img src={category.image_url} alt="" className="h-full w-full object-cover" />
+                  <img src={resolveImageUrl(category.image_url)} alt="" className="h-full w-full object-cover" />
                 ) : (
                   <Package size={20} className="text-teal" />
                 )}

@@ -5,6 +5,7 @@ import Header from "../components/Header";
 import Footer from "../components/Footer";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../api/client";
+import { resolveImageUrl } from "../utils/media";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -94,7 +95,7 @@ export default function Profile() {
                 <div className="h-20 w-20 rounded-full bg-bg border border-border overflow-hidden flex items-center justify-center">
                   {profile.profile_image_url ? (
                     <img
-                      src={`${API_BASE}${profile.profile_image_url}`}
+                      src={resolveImageUrl(profile.profile_image_url)}
                       alt={profile.name}
                       className="h-full w-full object-cover"
                     />

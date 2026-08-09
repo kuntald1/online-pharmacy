@@ -1,3 +1,4 @@
+import { resolveImageUrl } from "../utils/media";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Package } from "lucide-react";
@@ -47,7 +48,7 @@ export default function CategoryGrid({ channel }) {
           >
             <div className="h-16 w-16 rounded-2xl bg-bg border border-border flex items-center justify-center overflow-hidden group-hover:border-teal transition-colors">
               {cat.image_url ? (
-                <img src={cat.image_url} alt="" className="h-full w-full object-cover" />
+                <img src={resolveImageUrl(cat.image_url)} alt="" className="h-full w-full object-cover" />
               ) : (
                 <Package size={22} className="text-teal" />
               )}
