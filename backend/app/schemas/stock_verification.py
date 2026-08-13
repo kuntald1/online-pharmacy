@@ -85,6 +85,16 @@ class GroupedScanRowOut(BaseModel):
     confidence: str | None = None
 
 
+class ManualStripScanIn(BaseModel):
+    """What the mobile app sends after its own free, on-device OCR (ML
+    Kit) has already read the strip — no image, no Claude call, just the
+    text fields the employee has reviewed and confirmed."""
+    medicine_name: str | None = None
+    batch_no: str | None = None
+    mfg_date: str | None = None
+    exp_date: str | None = None
+
+
 class StripScanResultOut(BaseModel):
     """Returned after each scan-strip call: the individual scan that was
     just recorded, plus the freshly recomputed grouped table — this is

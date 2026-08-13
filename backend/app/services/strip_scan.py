@@ -138,6 +138,40 @@ def scan_strip(db: Session, session_id: int, employee_id: int, file_bytes: bytes
     return record
 
 
+def save_manual_scan(
+    db: Session, session_id: int, employee_id: int,
+    medicine_name: str | None, batch_no: str | None, mfg_date: str | None, exp_date: str | None,
+) -> StripScanRecord:
+    """Saves a strip scan that was already read by the mobile app's free,
+    on-device OCR (ML Kit) — this function makes NO Claude API call and
+    involves NO cost whatsoever. It exists specifically because per-strip
+    Claude calls were the wrong default for this app: the mobile app does
+    its own free text recognition and sends only the resulting fields
+    here to be persisted."""
+    session_row = db.query(ScanSession).filter(ScanSession.id == session_id).with_for_update().first()
+    if not session_row:
+        raise StripScanError("Scan session not found")
+    if session_row.employee_id != employee_id:
+        raise StripScanError("This scan session belongs to a different employee")
+
+    sequence_no = len(session_row.strip_scans) + 1
+    record = StripScanRecord(
+        session_id=session_id,
+        sequence_no=sequence_no,
+        image_path=None,  # no photo ever leaves the phone in this path
+        extracted_medicine_name=medicine_name,
+        extracted_batch_no=batch_no,
+        extracted_mfg_date=mfg_date,
+        extracted_exp_date=exp_date,
+        confidence="on_device",  # marks this came from free OCR, not Claude, for audit clarity
+        ocr_status=OcrStatus.accepted,
+    )
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return record
+
+
 def get_grouped_scan_rows(db: Session, session_id: int) -> list[dict]:
     """Groups this session's accepted strip scans by (medicine name, batch
     number) and counts them — this IS the 'Medicine X / Batch Y / Qty N'

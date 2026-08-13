@@ -10,16 +10,15 @@ from app.models.invoice import Invoice
 from app.models.enums import ScanSessionStatus
 from app.schemas.stock_verification import (
     InvoiceOut, InvoiceSummaryOut, ScanSessionOut, StripScanResultOut,
-    GroupedScanRowOut, CompareResultOut,
+    GroupedScanRowOut, CompareResultOut, ManualStripScanIn,
 )
 from app.services.stock_verification_extraction import extract_and_save_invoice_for_verification, StockVerificationInvoiceExtractionError
-from app.services.strip_scan import scan_strip, get_grouped_scan_rows, compare_session, StripScanError
+from app.services.strip_scan import get_grouped_scan_rows, compare_session, save_manual_scan, StripScanError
 from app.api.deps import get_current_user, require_admin
 
 router = APIRouter(prefix="/api/stock", tags=["stock-verification"])
 
 ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf"}
-ALLOWED_STRIP_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}  # strips are always photos, never PDFs
 MAX_FILE_SIZE = 15 * 1024 * 1024  # 15MB
 
 
@@ -112,28 +111,33 @@ def start_scan_session(
     return session
 
 
-@router.post("/scan-sessions/{session_id}/scan-strip", response_model=StripScanResultOut)
-async def scan_strip_endpoint(
+# NOTE: the paid, Claude-based per-strip endpoint that used to live here
+# has been deliberately removed. Strip scanning must never incur a
+# per-scan API cost — the mobile app does its own free on-device OCR and
+# posts to /scan-strip-manual below instead. If a future need for a paid,
+# higher-accuracy fallback ever comes up, that decision should be made
+# explicitly, not reintroduced by default.
+
+
+@router.get("/scan-sessions/{session_id}", response_model=ScanSessionOut)
+
+
+@router.post("/scan-sessions/{session_id}/scan-strip-manual", response_model=StripScanResultOut)
+def scan_strip_manual_endpoint(
     session_id: int,
-    file: UploadFile = File(...),
+    body: ManualStripScanIn,
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    """One call per strip photographed, any medicine. Returns the scan
-    that was just recorded plus the freshly regrouped 'Medicine / Batch /
-    Qty' table, so the app can update its live list from one response —
-    a repeat of the same medicine+batch increments an existing row's Qty,
-    a new medicine+batch appears as a new row, all computed automatically
-    from the grouping, not tracked as a separate counter."""
-    if file.content_type not in ALLOWED_STRIP_CONTENT_TYPES:
-        raise HTTPException(status_code=400, detail=f"Unsupported file type: {file.content_type}")
-
-    contents = await file.read()
-    if len(contents) > MAX_FILE_SIZE:
-        raise HTTPException(status_code=400, detail="File is too large (max 15MB)")
-
+    """FREE path — no Claude API call, no cost. The mobile app has already
+    run its own on-device OCR (ML Kit) and the employee has reviewed the
+    result; this just persists it. This is the endpoint the mobile app
+    actually uses for every scan."""
     try:
-        record = scan_strip(db, session_id, admin.id, contents, file.content_type)
+        record = save_manual_scan(
+            db, session_id, admin.id,
+            body.medicine_name, body.batch_no, body.mfg_date, body.exp_date,
+        )
     except StripScanError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
