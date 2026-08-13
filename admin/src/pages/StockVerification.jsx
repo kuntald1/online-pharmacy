@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Upload, Loader2, FileText, ChevronRight } from "lucide-react";
+import { Upload, Loader2, FileText, ChevronRight, ScanLine } from "lucide-react";
 import Layout from "../components/Layout";
 import Button from "../components/Button";
 import { api } from "../api/client";
@@ -20,6 +20,24 @@ function PackTypeBadge({ type }) {
   );
 }
 
+// Mirrors the mobile app's Compare screen status styling, so an admin
+// looking at the web page and an employee looking at the phone see the
+// same colors for the same meaning.
+function ScanStatusBadge({ status, scannedQty, expectedQty }) {
+  const styles = {
+    matched: { bg: "bg-green-100", text: "text-green-800", label: "Matched" },
+    short: { bg: "bg-red-100", text: "text-red-800", label: "Short" },
+    excess: { bg: "bg-amber-100", text: "text-amber-800", label: "Excess" },
+    not_scanned: { bg: "bg-ink-soft/10", text: "text-ink-soft", label: "Not scanned" },
+  };
+  const style = styles[status] || styles.not_scanned;
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${style.bg} ${style.text}`}>
+      {style.label} ({scannedQty}/{expectedQty})
+    </span>
+  );
+}
+
 export default function StockVerification() {
   const [invoice, setInvoice] = useState(null);
   const [recentInvoices, setRecentInvoices] = useState([]);
@@ -27,6 +45,14 @@ export default function StockVerification() {
   const [openingInvoiceId, setOpeningInvoiceId] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
+
+  // Mobile-app scanning progress for the currently open invoice — lets an
+  // admin see what's been scanned on a phone without opening the mobile
+  // app themselves. compareResult is the same match/short/excess/
+  // not_scanned data the mobile app's Compare screen shows.
+  const [scanSession, setScanSession] = useState(null);
+  const [compareResult, setCompareResult] = useState(null);
+  const [loadingScanProgress, setLoadingScanProgress] = useState(false);
 
   // Loads the recent-invoices list on page load (and again after returning
   // to the upload screen) — this is what lets someone open this page on a
@@ -47,10 +73,32 @@ export default function StockVerification() {
     try {
       const data = await api.get(`/api/stock/invoices/${id}`);
       setInvoice(data);
+      loadScanProgress(id);
     } catch (err) {
       setError(err.message);
     } finally {
       setOpeningInvoiceId(null);
+    }
+  }
+
+  // Fetches whether ANY device (mobile app, any employee) has started
+  // scanning against this invoice, and if so, the live Compare result —
+  // this is what makes mobile-app progress visible on the web admin page.
+  // A 404 here just means scanning hasn't started yet, which is a normal,
+  // expected state, not an error worth surfacing.
+  async function loadScanProgress(invoiceId) {
+    setLoadingScanProgress(true);
+    setScanSession(null);
+    setCompareResult(null);
+    try {
+      const session = await api.get(`/api/stock/invoices/${invoiceId}/latest-session`);
+      setScanSession(session);
+      const compare = await api.get(`/api/stock/scan-sessions/${session.id}/compare`);
+      setCompareResult(compare);
+    } catch {
+      // no scan session yet — leave scanSession/compareResult as null
+    } finally {
+      setLoadingScanProgress(false);
     }
   }
 
@@ -156,6 +204,33 @@ export default function StockVerification() {
             <Button variant="secondary" onClick={() => setInvoice(null)}>Upload another</Button>
           </div>
 
+          <div className="bg-white rounded-xl border border-border p-4 flex items-center gap-3">
+            {loadingScanProgress ? (
+              <>
+                <Loader2 size={16} className="animate-spin text-teal" />
+                <p className="text-sm text-ink-soft">Checking mobile scan progress…</p>
+              </>
+            ) : scanSession ? (
+              <>
+                <ScanLine size={16} className="text-teal shrink-0" />
+                <p className="text-sm text-ink">
+                  {scanSession.status === "completed" ? "Scanning completed on mobile" : "Scanning in progress on mobile"}
+                  {compareResult && (
+                    <span className="text-ink-soft">
+                      {" · "}
+                      {compareResult.rows.filter((r) => r.status === "matched").length} of {compareResult.rows.length} strip items matched
+                    </span>
+                  )}
+                </p>
+              </>
+            ) : (
+              <>
+                <ScanLine size={16} className="text-ink-soft shrink-0" />
+                <p className="text-sm text-ink-soft">No scanning started yet — an employee can begin from the mobile app</p>
+              </>
+            )}
+          </div>
+
           <div className="bg-white rounded-xl border border-border overflow-hidden">
             <table className="w-full text-sm">
               <thead>
@@ -165,21 +240,36 @@ export default function StockVerification() {
                   <th className="px-4 py-3 font-medium">Exp</th>
                   <th className="px-4 py-3 font-medium">Pack</th>
                   <th className="px-4 py-3 font-medium">Qty</th>
+                  <th className="px-4 py-3 font-medium">Scan status</th>
                 </tr>
               </thead>
               <tbody>
-                {invoice.line_items.map((item) => (
-                  <tr key={item.id} className="border-b border-border last:border-0">
-                    <td className="px-4 py-3 text-ink">{item.product_name}</td>
-                    <td className="px-4 py-3 text-ink-soft">{item.batch_no || "—"}</td>
-                    <td className="px-4 py-3 text-ink-soft">{item.exp_date || "—"}</td>
-                    <td className="px-4 py-3">
-                      <PackTypeBadge type={item.pack_type} />
-                      <span className="text-xs text-ink-soft ml-1.5">{item.pack}</span>
-                    </td>
-                    <td className="px-4 py-3 text-ink">{item.qty}</td>
-                  </tr>
-                ))}
+                {invoice.line_items.map((item) => {
+                  const compareRow = compareResult?.rows.find(
+                    (r) => (r.batch_no || "").trim().toLowerCase() === (item.batch_no || "").trim().toLowerCase()
+                  );
+                  return (
+                    <tr key={item.id} className="border-b border-border last:border-0">
+                      <td className="px-4 py-3 text-ink">{item.product_name}</td>
+                      <td className="px-4 py-3 text-ink-soft">{item.batch_no || "—"}</td>
+                      <td className="px-4 py-3 text-ink-soft">{item.exp_date || "—"}</td>
+                      <td className="px-4 py-3">
+                        <PackTypeBadge type={item.pack_type} />
+                        <span className="text-xs text-ink-soft ml-1.5">{item.pack}</span>
+                      </td>
+                      <td className="px-4 py-3 text-ink">{item.qty}</td>
+                      <td className="px-4 py-3">
+                        {item.pack_type !== "strip" ? (
+                          <span className="text-xs text-ink-soft">No scan needed</span>
+                        ) : compareRow ? (
+                          <ScanStatusBadge status={compareRow.status} scannedQty={compareRow.scanned_qty} expectedQty={compareRow.expected_qty} />
+                        ) : (
+                          <span className="text-xs text-ink-soft">Not scanned yet</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

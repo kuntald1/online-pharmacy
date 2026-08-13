@@ -133,7 +133,24 @@ def start_scan_session(
 # explicitly, not reintroduced by default.
 
 
-@router.get("/scan-sessions/{session_id}", response_model=ScanSessionOut)
+@router.get("/invoices/{invoice_id}/scan-session", response_model=ScanSessionOut)
+def get_invoice_scan_session(
+    invoice_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Finds the current (or most recent) scan session for this invoice —
+    this is what lets the web admin page show live scanning progress from
+    the mobile app, without the admin needing to know a session_id."""
+    session = (
+        db.query(ScanSession)
+        .filter(ScanSession.invoice_id == invoice_id)
+        .order_by(ScanSession.created_at.desc())
+        .first()
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="No scanning has started for this invoice yet")
+    return session
 
 
 @router.post("/scan-sessions/{session_id}/scan-strip-manual", response_model=StripScanResultOut)
@@ -157,6 +174,28 @@ def scan_strip_manual_endpoint(
 
     grouped = get_grouped_scan_rows(db, session_id)
     return StripScanResultOut(scan=record, grouped_rows=[GroupedScanRowOut(**row) for row in grouped])
+
+
+@router.get("/invoices/{invoice_id}/latest-session", response_model=ScanSessionOut)
+def get_latest_session_for_invoice(
+    invoice_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Finds the most recent scan session (in-progress or completed) for
+    this invoice, if any exists — this is what lets the WEB admin page
+    show mobile-app scanning progress without an admin needing to open
+    the mobile app themselves. Returns 404 if scanning hasn't started yet
+    for this invoice from any device."""
+    session = (
+        db.query(ScanSession)
+        .filter(ScanSession.invoice_id == invoice_id)
+        .order_by(ScanSession.created_at.desc())
+        .first()
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="No scanning has started for this invoice yet")
+    return session
 
 
 @router.get("/scan-sessions/{session_id}", response_model=ScanSessionOut)
