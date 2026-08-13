@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.stock_verification import ScanSession, StripScanRecord
+from app.models.invoice import InvoiceLineItem
 from app.models.enums import ScanSessionStatus, OcrStatus
 from app.api.routes.uploads import UPLOAD_DIR
 
@@ -149,6 +150,16 @@ def scan_strip(db: Session, session_id: int, employee_id: int, file_bytes: bytes
         session_row.scanned_qty += 1
         if session_row.scanned_qty >= session_row.expected_qty:
             session_row.status = ScanSessionStatus.completed
+            # Mark the invoice line item verified only if EVERY scan in
+            # this session matched the expected batch — a completed count
+            # with even one mismatched strip is not a clean verification,
+            # it's a completed count that also surfaced a problem.
+            if session_row.invoice_line_item_id:
+                any_mismatch = any(s.batch_mismatch for s in session_row.strip_scans) or batch_mismatch
+                if not any_mismatch:
+                    line_item = db.get(InvoiceLineItem, session_row.invoice_line_item_id)
+                    if line_item:
+                        line_item.is_verified = True
 
     db.commit()
     db.refresh(record)

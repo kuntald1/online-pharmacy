@@ -4,8 +4,9 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.database import get_db
 from app.models.user import User
 from app.models.stock_verification import ScanSession
+from app.models.invoice import Invoice
 from app.schemas.stock_verification import (
-    InvoiceOut, StartScanSessionIn, ScanSessionOut, StripScanOut,
+    InvoiceOut, InvoiceSummaryOut, StartScanSessionIn, ScanSessionOut, StripScanOut,
 )
 from app.services.stock_verification_extraction import extract_and_save_invoice_for_verification, StockVerificationInvoiceExtractionError
 from app.services.strip_scan import scan_strip, StripScanError
@@ -39,6 +40,58 @@ async def upload_invoice(
     except StockVerificationInvoiceExtractionError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
+    return invoice
+
+
+@router.get("/invoices", response_model=list[InvoiceSummaryOut])
+def list_invoices(
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Recent invoices, newest first — this is what lets an employee open
+    the app on a different device (e.g. their phone, after someone else
+    uploaded the invoice from a desktop) and find the right one to scan
+    against. Without this, the upload screen only ever showed whatever was
+    just uploaded in that same browser session, which is useless the
+    moment you switch devices or refresh the page."""
+    invoices = (
+        db.query(Invoice)
+        .options(joinedload(Invoice.line_items))
+        .order_by(Invoice.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    return [
+        InvoiceSummaryOut(
+            id=inv.id,
+            wholesaler_name=inv.wholesaler_name,
+            invoice_no=inv.invoice_no,
+            invoice_date=inv.invoice_date,
+            created_at=inv.created_at,
+            line_item_count=len(inv.line_items),
+        )
+        for inv in invoices
+    ]
+
+
+@router.get("/invoices/{invoice_id}", response_model=InvoiceOut)
+def get_invoice(
+    invoice_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Reopens one invoice with its full line-item table — this is what
+    the employee's device calls after picking an invoice from the list,
+    so they land on the exact same screen as if they'd just uploaded it
+    themselves."""
+    invoice = (
+        db.query(Invoice)
+        .options(joinedload(Invoice.line_items))
+        .filter(Invoice.id == invoice_id)
+        .first()
+    )
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
     return invoice
 
 

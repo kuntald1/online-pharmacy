@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Upload, Loader2, ScanLine, CheckCircle2 } from "lucide-react";
+import { Upload, Loader2, ScanLine, CheckCircle2, FileText, ChevronRight } from "lucide-react";
 import Layout from "../components/Layout";
 import Button from "../components/Button";
 import { api } from "../api/client";
@@ -24,9 +24,38 @@ function PackTypeBadge({ type }) {
 export default function StockVerification() {
   const navigate = useNavigate();
   const [invoice, setInvoice] = useState(null);
+  const [recentInvoices, setRecentInvoices] = useState([]);
+  const [loadingRecent, setLoadingRecent] = useState(true);
+  const [openingInvoiceId, setOpeningInvoiceId] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [startingSessionFor, setStartingSessionFor] = useState(null);
+
+  // Loads the recent-invoices list on page load (and again after returning
+  // to the upload screen) — this is what lets someone open this page on a
+  // different device, or after a refresh, and find an invoice that was
+  // already uploaded, instead of seeing a blank upload box every time.
+  useEffect(() => {
+    if (invoice) return;
+    setLoadingRecent(true);
+    api.get("/api/stock/invoices")
+      .then(setRecentInvoices)
+      .catch((err) => setError(err.message))
+      .finally(() => setLoadingRecent(false));
+  }, [invoice]);
+
+  async function openInvoice(id) {
+    setOpeningInvoiceId(id);
+    setError("");
+    try {
+      const data = await api.get(`/api/stock/invoices/${id}`);
+      setInvoice(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setOpeningInvoiceId(null);
+    }
+  }
 
   async function handleUpload(e) {
     const file = e.target.files[0];
@@ -76,22 +105,61 @@ export default function StockVerification() {
       subtitle="Upload a wholesaler invoice, then verify received strips against it"
     >
       {!invoice && (
-        <div className="bg-white rounded-xl border border-border p-8 max-w-xl">
-          <label className="flex flex-col items-center justify-center gap-3 border-2 border-dashed border-border rounded-lg py-12 cursor-pointer hover:border-teal transition-colors">
-            {uploading ? <Loader2 size={28} className="animate-spin text-teal" /> : <Upload size={28} className="text-ink-soft" />}
-            <div className="text-center">
-              <p className="text-sm font-medium text-ink">{uploading ? "Reading invoice…" : "Upload wholesaler invoice"}</p>
-              <p className="text-xs text-ink-soft mt-1">JPG, PNG, or PDF</p>
-            </div>
-            <input
-              type="file"
-              accept="image/jpeg,image/png,image/webp,application/pdf"
-              className="hidden"
-              onChange={handleUpload}
-              disabled={uploading}
-            />
-          </label>
-          {error && <p className="text-red text-sm mt-3">{error}</p>}
+        <div className="space-y-6 max-w-xl">
+          <div className="bg-white rounded-xl border border-border p-8">
+            <label className="flex flex-col items-center justify-center gap-3 border-2 border-dashed border-border rounded-lg py-12 cursor-pointer hover:border-teal transition-colors">
+              {uploading ? <Loader2 size={28} className="animate-spin text-teal" /> : <Upload size={28} className="text-ink-soft" />}
+              <div className="text-center">
+                <p className="text-sm font-medium text-ink">{uploading ? "Reading invoice…" : "Upload wholesaler invoice"}</p>
+                <p className="text-xs text-ink-soft mt-1">JPG, PNG, or PDF</p>
+              </div>
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp,application/pdf"
+                className="hidden"
+                onChange={handleUpload}
+                disabled={uploading}
+              />
+            </label>
+            {error && <p className="text-red text-sm mt-3">{error}</p>}
+          </div>
+
+          <div>
+            <p className="text-xs font-medium text-ink-soft uppercase tracking-wide mb-2">Recent invoices</p>
+            {loadingRecent ? (
+              <div className="flex items-center gap-2 text-sm text-ink-soft py-4">
+                <Loader2 size={16} className="animate-spin" /> Loading…
+              </div>
+            ) : recentInvoices.length === 0 ? (
+              <p className="text-sm text-ink-soft py-2">No invoices uploaded yet.</p>
+            ) : (
+              <div className="bg-white rounded-xl border border-border divide-y divide-border">
+                {recentInvoices.map((inv) => (
+                  <button
+                    key={inv.id}
+                    onClick={() => openInvoice(inv.id)}
+                    disabled={openingInvoiceId === inv.id}
+                    className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-bg transition-colors disabled:opacity-60"
+                  >
+                    <div className="flex items-center gap-3">
+                      <FileText size={16} className="text-ink-soft shrink-0" />
+                      <div>
+                        <p className="text-sm text-ink">{inv.wholesaler_name || "Unknown wholesaler"}</p>
+                        <p className="text-xs text-ink-soft mt-0.5">
+                          Invoice {inv.invoice_no || "—"} · {inv.line_item_count} items
+                        </p>
+                      </div>
+                    </div>
+                    {openingInvoiceId === inv.id ? (
+                      <Loader2 size={16} className="animate-spin text-teal shrink-0" />
+                    ) : (
+                      <ChevronRight size={16} className="text-ink-soft shrink-0" />
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

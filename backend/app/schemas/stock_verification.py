@@ -29,6 +29,21 @@ class InvoiceOut(BaseModel):
         from_attributes = True
 
 
+class InvoiceSummaryOut(BaseModel):
+    """Lightweight — used for the 'recent invoices' list, without the full
+    line-item table, so opening the Stock Verification page doesn't pull
+    every line item of every invoice just to render a list of names."""
+    id: int
+    wholesaler_name: str | None = None
+    invoice_no: str | None = None
+    invoice_date: str | None = None
+    created_at: datetime
+    line_item_count: int
+
+    class Config:
+        from_attributes = True
+
+
 class StartScanSessionIn(BaseModel):
     invoice_line_item_id: int | None = None
     product_name: str
