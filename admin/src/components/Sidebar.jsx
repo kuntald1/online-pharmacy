@@ -3,7 +3,7 @@ import { useState } from "react";
 import {
   LayoutDashboard, Package, FolderTree, Tags, Image as ImageIcon,
   ClipboardList, ShieldCheck, Send, ChevronRight, LogOut,
-  Users, Boxes, Ticket, Megaphone, BarChart3, FileText, Settings as SettingsIcon, Star, Stethoscope, MapPin, RotateCcw,
+  Users, Boxes, Ticket, Megaphone, BarChart3, FileText, Settings as SettingsIcon, Star, Stethoscope, MapPin, RotateCcw, ScanLine,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import Logo from "./Logo";
@@ -23,6 +23,7 @@ const NAV_SECTIONS = [
       { to: "/health-packages", label: "Health Packages", icon: Stethoscope },
       { to: "/delivery-zones", label: "Delivery Zones", icon: MapPin },
       { to: "/inventory", label: "Inventory", icon: Boxes },
+      { to: "/stock-verification", label: "Stock Verification", icon: ScanLine },
       { to: "/reviews", label: "Reviews", icon: Star },
     ],
   },

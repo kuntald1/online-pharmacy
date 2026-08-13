@@ -25,6 +25,8 @@ import Marketing from "./pages/Marketing";
 import Reports from "./pages/Reports";
 import CMS from "./pages/CMS";
 import Settings from "./pages/Settings";
+import StockVerification from "./pages/StockVerification";
+import StripScan from "./pages/StripScan";
 
 export default function App() {
   return (
@@ -54,6 +56,8 @@ export default function App() {
           <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
           <Route path="/cms" element={<ProtectedRoute><CMS /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+          <Route path="/stock-verification" element={<ProtectedRoute><StockVerification /></ProtectedRoute>} />
+          <Route path="/stock-verification/scan/:sessionId" element={<ProtectedRoute><StripScan /></ProtectedRoute>} />
         </Routes>
       </AuthProvider>
     </BrowserRouter>
