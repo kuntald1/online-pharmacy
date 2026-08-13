@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
-from app.api.routes import auth, b2b, catalog, orders, cnf, admin_extras, uploads, products_import, customer_auth, reviews, relations, prescriptions, wishlist, health_packages, delivery_zones, profile, wallet, returns
+from app.api.routes import auth, b2b, catalog, orders, cnf, admin_extras, uploads, products_import, customer_auth, reviews, relations, prescriptions, wishlist, health_packages, delivery_zones, profile, wallet, returns, stock_verification
 
 app = FastAPI(title="Healthycian API", version="0.1.0")
 
@@ -36,6 +36,7 @@ app.include_router(delivery_zones.router)
 app.include_router(profile.router)
 app.include_router(wallet.router)
 app.include_router(returns.router)
+app.include_router(stock_verification.router)
 
 
 @app.get("/api/health")

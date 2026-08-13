@@ -11,6 +11,8 @@ from app.models.health_package import HealthPackage
 from app.models.delivery_zone import DeliveryZone
 from app.models.wallet import WalletTransaction
 from app.models.return_request import ReturnRequest
+from app.models.invoice import Invoice, InvoiceLineItem
+from app.models.stock_verification import ScanSession, StripScanRecord
 
 __all__ = [
     "User",
@@ -39,4 +41,8 @@ __all__ = [
     "DeliveryZone",
     "WalletTransaction",
     "ReturnRequest",
+    "Invoice",
+    "InvoiceLineItem",
+    "ScanSession",
+    "StripScanRecord",
 ]

@@ -100,3 +100,24 @@ class RelationType(str, enum.Enum):
     fbt = "fbt"                # "Frequently bought together"
     similar = "similar"        # "Similar products"
     also_bought = "also_bought"  # "Customers who bought this item also bought"
+
+
+class PackType(str, enum.Enum):
+    """Classifies an invoice line item's Pack column so the system knows
+    which items are strip-trackable. 'strip' = pack ends in S (e.g. '10S'),
+    meaning qty = number of strips to verify. 'bottle'/'unit' items skip
+    strip-level scanning entirely — they're just counted as whole pieces."""
+    strip = "strip"
+    bottle = "bottle"
+    unit = "unit"
+    other = "other"
+
+
+class ScanSessionStatus(str, enum.Enum):
+    in_progress = "in_progress"
+    completed = "completed"
+
+
+class OcrStatus(str, enum.Enum):
+    accepted = "accepted"
+    needs_retry = "needs_retry"
