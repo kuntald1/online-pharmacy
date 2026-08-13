@@ -53,6 +53,7 @@ class StripScanRecord(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     session_id: Mapped[int] = mapped_column(ForeignKey("scan_sessions.id"))
     sequence_no: Mapped[int] = mapped_column(Integer)  # 1st, 2nd, 3rd strip scanned in this session, any medicine
+    scanned_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)  # which employee made THIS scan — sessions are shared, so this isn't always session.employee_id
 
     image_path: Mapped[str | None] = mapped_column(String(500), nullable=True)  # always None once processed — see docstring
 
@@ -67,3 +68,4 @@ class StripScanRecord(Base):
     scanned_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     session: Mapped["ScanSession"] = relationship(back_populates="strip_scans")
+    scanned_by: Mapped["User"] = relationship()

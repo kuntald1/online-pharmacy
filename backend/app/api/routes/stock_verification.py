@@ -96,13 +96,27 @@ def start_scan_session(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    """Starts a free-form scanning session against one invoice. The
-    employee can now scan strips for ANY medicine on this invoice in any
-    order — matching against expected batches/quantities happens later,
-    via the Compare endpoint, not as each strip is scanned."""
+    """Starts (or JOINS) a free-form scanning session for one invoice.
+    Deliberately shared, not per-employee: if another employee already
+    has an in-progress session for this same invoice, this returns THAT
+    session rather than creating a new isolated one — so Employee A and
+    Employee B scanning the same box's strips both contribute to the same
+    running Medicine+Batch+Qty table, instead of each seeing only their
+    own scans. The row lock in save_manual_scan (strip_scan.py) is what
+    keeps two employees scanning at the exact same moment from stepping
+    on each other's sequence numbers."""
     invoice = db.get(Invoice, invoice_id)
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+
+    existing = (
+        db.query(ScanSession)
+        .filter(ScanSession.invoice_id == invoice_id, ScanSession.status == ScanSessionStatus.in_progress)
+        .order_by(ScanSession.created_at.desc())
+        .first()
+    )
+    if existing:
+        return existing
 
     session = ScanSession(invoice_id=invoice_id, employee_id=admin.id)
     db.add(session)

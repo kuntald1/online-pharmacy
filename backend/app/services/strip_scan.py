@@ -147,17 +147,23 @@ def save_manual_scan(
     involves NO cost whatsoever. It exists specifically because per-strip
     Claude calls were the wrong default for this app: the mobile app does
     its own free text recognition and sends only the resulting fields
-    here to be persisted."""
+    here to be persisted.
+
+    Deliberately NOT restricted to the employee who started the session —
+    sessions are shared per-invoice (see start_scan_session in the
+    router), so Employee A and Employee B scanning the same box both need
+    to be able to write into the same session. scanned_by_id records
+    which employee actually made THIS scan, so the shared session still
+    keeps a per-scan audit trail even though it's collaborative."""
     session_row = db.query(ScanSession).filter(ScanSession.id == session_id).with_for_update().first()
     if not session_row:
         raise StripScanError("Scan session not found")
-    if session_row.employee_id != employee_id:
-        raise StripScanError("This scan session belongs to a different employee")
 
     sequence_no = len(session_row.strip_scans) + 1
     record = StripScanRecord(
         session_id=session_id,
         sequence_no=sequence_no,
+        scanned_by_id=employee_id,
         image_path=None,  # no photo ever leaves the phone in this path
         extracted_medicine_name=medicine_name,
         extracted_batch_no=batch_no,
