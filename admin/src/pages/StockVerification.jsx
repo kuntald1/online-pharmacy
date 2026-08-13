@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Upload, Loader2, ScanLine, CheckCircle2, FileText, ChevronRight } from "lucide-react";
+import { Upload, Loader2, FileText, ChevronRight } from "lucide-react";
 import Layout from "../components/Layout";
 import Button from "../components/Button";
 import { api } from "../api/client";
@@ -22,14 +21,12 @@ function PackTypeBadge({ type }) {
 }
 
 export default function StockVerification() {
-  const navigate = useNavigate();
   const [invoice, setInvoice] = useState(null);
   const [recentInvoices, setRecentInvoices] = useState([]);
   const [loadingRecent, setLoadingRecent] = useState(true);
   const [openingInvoiceId, setOpeningInvoiceId] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
-  const [startingSessionFor, setStartingSessionFor] = useState(null);
 
   // Loads the recent-invoices list on page load (and again after returning
   // to the upload screen) — this is what lets someone open this page on a
@@ -83,26 +80,10 @@ export default function StockVerification() {
     }
   }
 
-  async function startScanSession(item) {
-    setStartingSessionFor(item.id);
-    try {
-      const session = await api.post("/api/stock/scan-sessions", {
-        invoice_line_item_id: item.id,
-        product_name: item.product_name,
-        batch_no_expected: item.batch_no,
-        expected_qty: item.qty,
-      });
-      navigate(`/stock-verification/scan/${session.id}`);
-    } catch (err) {
-      setError(err.message);
-      setStartingSessionFor(null);
-    }
-  }
-
   return (
     <Layout
       title="Stock Verification"
-      subtitle="Upload a wholesaler invoice, then verify received strips against it"
+      subtitle="Upload a wholesaler invoice — strip scanning and verification happens in the mobile app"
     >
       {!invoice && (
         <div className="space-y-6 max-w-xl">
@@ -184,7 +165,6 @@ export default function StockVerification() {
                   <th className="px-4 py-3 font-medium">Exp</th>
                   <th className="px-4 py-3 font-medium">Pack</th>
                   <th className="px-4 py-3 font-medium">Qty</th>
-                  <th className="px-4 py-3 font-medium"></th>
                 </tr>
               </thead>
               <tbody>
@@ -198,25 +178,6 @@ export default function StockVerification() {
                       <span className="text-xs text-ink-soft ml-1.5">{item.pack}</span>
                     </td>
                     <td className="px-4 py-3 text-ink">{item.qty}</td>
-                    <td className="px-4 py-3 text-right">
-                      {item.pack_type !== "strip" ? (
-                        <span className="text-xs text-ink-soft">No scan needed</span>
-                      ) : item.is_verified ? (
-                        <span className="inline-flex items-center gap-1 text-xs text-teal-dark">
-                          <CheckCircle2 size={14} /> Verified
-                        </span>
-                      ) : (
-                        <Button
-                          variant="secondary"
-                          className="!px-3 !py-1.5 text-xs"
-                          onClick={() => startScanSession(item)}
-                          disabled={startingSessionFor === item.id}
-                        >
-                          <ScanLine size={14} />
-                          {startingSessionFor === item.id ? "Starting…" : "Scan strips"}
-                        </Button>
-                      )}
-                    </td>
                   </tr>
                 ))}
               </tbody>
