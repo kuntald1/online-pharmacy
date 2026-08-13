@@ -1,13 +1,10 @@
 """
-Strip-by-strip scanning service. Mirrors prescription_extraction.py's
-Claude-calling pattern, but adds two things prescriptions didn't need:
-
-1. A local staging folder (same UPLOAD_DIR pattern prescriptions.py uses)
-   for the photo - uploaded, sent to Claude, then DELETED from disk right
-   after a successful save. Only the extracted text (batch/mfg/exp) is
-   kept permanently, in Postgres - the photo itself is never retained.
-2. Everything scoped to a session_id, so concurrent scans by different
-   employees never share or collide on the same counters.
+Strip-by-strip scanning service, redesigned for free-form scanning: an
+employee scans strips against ONE invoice, in any order, any medicine.
+Matching medicine+batch combinations accumulate as grouped rows (computed
+live from StripScanRecord, not stored as a separate counter). Comparing
+against what the invoice actually expected happens on demand via
+compare_session(), not per-scan.
 """
 import base64
 import json
@@ -19,10 +16,10 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.stock_verification import ScanSession, StripScanRecord
 from app.models.invoice import InvoiceLineItem
-from app.models.enums import ScanSessionStatus, OcrStatus
+from app.models.enums import OcrStatus, PackType
 from app.api.routes.uploads import UPLOAD_DIR
 
-MODEL = "claude-haiku-4-5-20251001"  # cheap, high-volume, well-formatted strips - see extraction prompt notes below
+MODEL = "claude-haiku-4-5-20251001"
 
 STAGING_DIR = UPLOAD_DIR / "strip_scans_staging"
 STAGING_DIR.mkdir(parents=True, exist_ok=True)
@@ -63,11 +60,7 @@ def _delete_from_staging(file_path: Path) -> None:
     try:
         file_path.unlink(missing_ok=True)
     except Exception:
-        # Deletion failing shouldn't fail the whole scan - the extracted
-        # data is already saved. Worth a periodic cleanup script that
-        # sweeps STAGING_DIR for anything older than a day, as a safety
-        # net for any files this leaves behind.
-        pass
+        pass  # extracted data is already saved; a periodic sweep of STAGING_DIR is the safety net
 
 
 def _call_claude(file_bytes: bytes, content_type: str) -> dict:
@@ -104,71 +97,140 @@ def _call_claude(file_bytes: bytes, content_type: str) -> dict:
 
 
 def scan_strip(db: Session, session_id: int, employee_id: int, file_bytes: bytes, content_type: str) -> StripScanRecord:
-    """Scans one strip within an existing session. Caller (the API route)
-    is responsible for verifying the session belongs to this employee -
-    kept here as a defensive check too, since a session_id could otherwise
-    be guessed/reused across employees."""
+    """Scans one strip and saves it as raw evidence. Does NOT do any
+    matching against the invoice here — that's deliberately deferred to
+    compare_session(), since at scan time we don't know yet whether this
+    strip is expected, extra, or belongs to a different box entirely."""
     session_row = db.query(ScanSession).filter(ScanSession.id == session_id).with_for_update().first()
     if not session_row:
         raise StripScanError("Scan session not found")
     if session_row.employee_id != employee_id:
         raise StripScanError("This scan session belongs to a different employee")
-    if session_row.status != ScanSessionStatus.in_progress:
-        raise StripScanError("This scan session is already completed")
 
-    sequence_no = session_row.scanned_qty + 1
+    sequence_no = len(session_row.strip_scans) + 1
     staged_path = _upload_to_staging(file_bytes, session_id, sequence_no, content_type)
 
     try:
         data = _call_claude(file_bytes, content_type)
     except StripScanError:
-        # keep the photo in staging for a manual retry - don't delete on failure
-        raise
+        raise  # keep the photo staged for a manual retry — don't delete on failure
 
     ocr_status = OcrStatus.needs_retry if (data.get("error") or data.get("confidence") == "low") else OcrStatus.accepted
-    batch_mismatch = bool(
-        session_row.batch_no_expected
-        and data.get("batch_no")
-        and data["batch_no"] != session_row.batch_no_expected
-    )
 
     record = StripScanRecord(
         session_id=session_id,
         sequence_no=sequence_no,
-        image_path=None,  # never persisted to DB - photo is deleted from disk right after this, see below
+        image_path=None,
         extracted_medicine_name=data.get("medicine_name"),
         extracted_batch_no=data.get("batch_no"),
         extracted_mfg_date=data.get("mfg_date"),
         extracted_exp_date=data.get("exp_date"),
         confidence=data.get("confidence"),
         ocr_status=ocr_status,
-        batch_mismatch=batch_mismatch,
     )
     db.add(record)
-
-    if ocr_status == OcrStatus.accepted:
-        session_row.scanned_qty += 1
-        if session_row.scanned_qty >= session_row.expected_qty:
-            session_row.status = ScanSessionStatus.completed
-            # Mark the invoice line item verified only if EVERY scan in
-            # this session matched the expected batch — a completed count
-            # with even one mismatched strip is not a clean verification,
-            # it's a completed count that also surfaced a problem.
-            if session_row.invoice_line_item_id:
-                any_mismatch = any(s.batch_mismatch for s in session_row.strip_scans) or batch_mismatch
-                if not any_mismatch:
-                    line_item = db.get(InvoiceLineItem, session_row.invoice_line_item_id)
-                    if line_item:
-                        line_item.is_verified = True
-
     db.commit()
     db.refresh(record)
 
-    # Photo's job is done the moment extraction succeeds - delete it from
-    # disk immediately. On needs_retry we deliberately keep it (see the
-    # retry endpoint, not shown here) so the employee can re-attempt
-    # without re-photographing.
     if ocr_status == OcrStatus.accepted:
         _delete_from_staging(staged_path)
 
     return record
+
+
+def get_grouped_scan_rows(db: Session, session_id: int) -> list[dict]:
+    """Groups this session's accepted strip scans by (medicine name, batch
+    number) and counts them — this IS the 'Medicine X / Batch Y / Qty N'
+    table the employee sees live while scanning. Computed fresh from the
+    raw scan records every time, so it can never drift out of sync with
+    what was actually scanned."""
+    records = (
+        db.query(StripScanRecord)
+        .filter(StripScanRecord.session_id == session_id, StripScanRecord.ocr_status == OcrStatus.accepted)
+        .order_by(StripScanRecord.sequence_no)
+        .all()
+    )
+
+    groups: dict[tuple[str, str], dict] = {}
+    for r in records:
+        # Normalize just enough to group sensibly (case/whitespace) without
+        # rewriting what was actually read off the strip.
+        name_key = (r.extracted_medicine_name or "").strip().lower()
+        batch_key = (r.extracted_batch_no or "").strip().lower()
+        key = (name_key, batch_key)
+        if key not in groups:
+            groups[key] = {
+                "medicine_name": r.extracted_medicine_name,
+                "batch_no": r.extracted_batch_no,
+                "mfg_date": r.extracted_mfg_date,
+                "exp_date": r.extracted_exp_date,
+                "qty": 0,
+                "confidence": r.confidence,
+            }
+        groups[key]["qty"] += 1
+
+    return list(groups.values())
+
+
+def compare_session(db: Session, session_id: int) -> dict:
+    """Reconciles the grouped scan rows against the invoice's line items.
+    Matching is done by batch number, not medicine name — batch numbers
+    are precise alphanumeric codes, while medicine names read off a strip
+    photo vs. an invoice photo can have small spelling/formatting
+    differences even when they're clearly the same product. A batch
+    number match is a much more reliable signal of "this is the same
+    thing" than a fuzzy name match would be."""
+    session_row = db.query(ScanSession).filter(ScanSession.id == session_id).first()
+    if not session_row:
+        raise StripScanError("Scan session not found")
+
+    scanned_rows = get_grouped_scan_rows(db, session_id)
+    scanned_by_batch = {(row["batch_no"] or "").strip().lower(): row for row in scanned_rows}
+    matched_batch_keys: set[str] = set()
+
+    line_items = (
+        db.query(InvoiceLineItem)
+        .filter(InvoiceLineItem.invoice_id == session_row.invoice_id, InvoiceLineItem.pack_type == PackType.strip)
+        .all()
+    )
+
+    comparison_rows = []
+    for item in line_items:
+        batch_key = (item.batch_no or "").strip().lower()
+        scanned = scanned_by_batch.get(batch_key)
+
+        if scanned:
+            matched_batch_keys.add(batch_key)
+            scanned_qty = scanned["qty"]
+            if scanned_qty == item.qty:
+                status = "matched"
+            elif scanned_qty < item.qty:
+                status = "short"
+            else:
+                status = "excess"
+        else:
+            scanned_qty = 0
+            status = "not_scanned"
+
+        comparison_rows.append({
+            "product_name": item.product_name,
+            "batch_no": item.batch_no,
+            "expected_qty": item.qty,
+            "scanned_qty": scanned_qty,
+            "status": status,
+        })
+
+    # Scanned batches that don't correspond to ANY line item on this
+    # invoice — e.g. a strip from a completely different box got mixed in,
+    # like the Norfloxacin-vs-Telmikind case seen in testing.
+    unexpected_scans = [
+        row for key, row in scanned_by_batch.items()
+        if key not in matched_batch_keys and key != ""
+    ]
+
+    return {
+        "session_id": session_id,
+        "invoice_id": session_row.invoice_id,
+        "rows": comparison_rows,
+        "unexpected_scans": unexpected_scans,
+    }

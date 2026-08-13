@@ -44,20 +44,16 @@ class InvoiceSummaryOut(BaseModel):
         from_attributes = True
 
 
-class StartScanSessionIn(BaseModel):
-    invoice_line_item_id: int | None = None
-    product_name: str
-    batch_no_expected: str | None = None
-    expected_qty: int
-
-
 class ScanSessionOut(BaseModel):
+    """No expected_qty/scanned_qty anymore — a session now spans the whole
+    invoice, potentially many medicines and batches, so there's no single
+    running count to show. The grouped rows (GroupedScanRowOut, below) are
+    what the client polls/displays live instead."""
     id: int
-    product_name: str
-    batch_no_expected: str | None = None
-    expected_qty: int
-    scanned_qty: int
+    invoice_id: int
     status: str
+    created_at: datetime
+    completed_at: datetime | None = None
 
     class Config:
         from_attributes = True
@@ -72,8 +68,42 @@ class StripScanOut(BaseModel):
     extracted_exp_date: str | None = None
     confidence: str | None = None
     ocr_status: str
-    batch_mismatch: bool
-    session: ScanSessionOut  # so the client can update its progress display from one response
+    scanned_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class GroupedScanRowOut(BaseModel):
+    """One row of the live 'Medicine X / Batch Y / Qty N' table — computed
+    by grouping accepted strip scans, not a persisted row itself."""
+    medicine_name: str | None = None
+    batch_no: str | None = None
+    mfg_date: str | None = None
+    exp_date: str | None = None
+    qty: int
+    confidence: str | None = None
+
+
+class StripScanResultOut(BaseModel):
+    """Returned after each scan-strip call: the individual scan that was
+    just recorded, plus the freshly recomputed grouped table — this is
+    all the mobile app needs to update both the scan log and the live
+    Qty table in one response."""
+    scan: StripScanOut
+    grouped_rows: list[GroupedScanRowOut]
+
+
+class CompareRowOut(BaseModel):
+    product_name: str
+    batch_no: str | None = None
+    expected_qty: int
+    scanned_qty: int
+    status: str  # matched | short | excess | not_scanned
+
+
+class CompareResultOut(BaseModel):
+    session_id: int
+    invoice_id: int
+    rows: list[CompareRowOut]
+    unexpected_scans: list[GroupedScanRowOut]  # scanned batches that don't belong to any line item on this invoice

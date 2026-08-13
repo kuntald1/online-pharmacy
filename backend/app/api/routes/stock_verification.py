@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session, joinedload
 
@@ -5,11 +7,13 @@ from app.core.database import get_db
 from app.models.user import User
 from app.models.stock_verification import ScanSession
 from app.models.invoice import Invoice
+from app.models.enums import ScanSessionStatus
 from app.schemas.stock_verification import (
-    InvoiceOut, InvoiceSummaryOut, StartScanSessionIn, ScanSessionOut, StripScanOut,
+    InvoiceOut, InvoiceSummaryOut, ScanSessionOut, StripScanResultOut,
+    GroupedScanRowOut, CompareResultOut,
 )
 from app.services.stock_verification_extraction import extract_and_save_invoice_for_verification, StockVerificationInvoiceExtractionError
-from app.services.strip_scan import scan_strip, StripScanError
+from app.services.strip_scan import scan_strip, get_grouped_scan_rows, compare_session, StripScanError
 from app.api.deps import get_current_user, require_admin
 
 router = APIRouter(prefix="/api/stock", tags=["stock-verification"])
@@ -48,12 +52,8 @@ def list_invoices(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    """Recent invoices, newest first — this is what lets an employee open
-    the app on a different device (e.g. their phone, after someone else
-    uploaded the invoice from a desktop) and find the right one to scan
-    against. Without this, the upload screen only ever showed whatever was
-    just uploaded in that same browser session, which is useless the
-    moment you switch devices or refresh the page."""
+    """Recent invoices, newest first — lets an employee open the mobile
+    app on their own device and find the right invoice to scan against."""
     invoices = (
         db.query(Invoice)
         .options(joinedload(Invoice.line_items))
@@ -80,10 +80,6 @@ def get_invoice(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    """Reopens one invoice with its full line-item table — this is what
-    the employee's device calls after picking an invoice from the list,
-    so they land on the exact same screen as if they'd just uploaded it
-    themselves."""
     invoice = (
         db.query(Invoice)
         .options(joinedload(Invoice.line_items))
@@ -95,39 +91,40 @@ def get_invoice(
     return invoice
 
 
-@router.post("/scan-sessions", response_model=ScanSessionOut)
+@router.post("/invoices/{invoice_id}/scan-sessions", response_model=ScanSessionOut)
 def start_scan_session(
-    body: StartScanSessionIn,
+    invoice_id: int,
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    """Starts a new strip-scanning session for one employee verifying one
-    box. Each session tracks its own scanned_qty independently, so
-    multiple employees scanning different boxes at the same time never
-    interfere with each other's counts."""
-    session = ScanSession(
-        employee_id=admin.id,
-        invoice_line_item_id=body.invoice_line_item_id,
-        product_name=body.product_name,
-        batch_no_expected=body.batch_no_expected,
-        expected_qty=body.expected_qty,
-    )
+    """Starts a free-form scanning session against one invoice. The
+    employee can now scan strips for ANY medicine on this invoice in any
+    order — matching against expected batches/quantities happens later,
+    via the Compare endpoint, not as each strip is scanned."""
+    invoice = db.get(Invoice, invoice_id)
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    session = ScanSession(invoice_id=invoice_id, employee_id=admin.id)
     db.add(session)
     db.commit()
     db.refresh(session)
     return session
 
 
-@router.post("/scan-sessions/{session_id}/scan-strip", response_model=StripScanOut)
+@router.post("/scan-sessions/{session_id}/scan-strip", response_model=StripScanResultOut)
 async def scan_strip_endpoint(
     session_id: int,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    """One call per strip photographed. Returns the extracted data plus
-    the session's updated scanned_qty, so the client can update its live
-    progress display ("7 of 10 strips") from this one response."""
+    """One call per strip photographed, any medicine. Returns the scan
+    that was just recorded plus the freshly regrouped 'Medicine / Batch /
+    Qty' table, so the app can update its live list from one response —
+    a repeat of the same medicine+batch increments an existing row's Qty,
+    a new medicine+batch appears as a new row, all computed automatically
+    from the grouping, not tracked as a separate counter."""
     if file.content_type not in ALLOWED_STRIP_CONTENT_TYPES:
         raise HTTPException(status_code=400, detail=f"Unsupported file type: {file.content_type}")
 
@@ -140,7 +137,8 @@ async def scan_strip_endpoint(
     except StripScanError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    return record
+    grouped = get_grouped_scan_rows(db, session_id)
+    return StripScanResultOut(scan=record, grouped_rows=[GroupedScanRowOut(**row) for row in grouped])
 
 
 @router.get("/scan-sessions/{session_id}", response_model=ScanSessionOut)
@@ -149,8 +147,60 @@ def get_scan_session(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    """For reloading progress if the employee's page refreshes mid-scan."""
+    """For reloading the session if the employee's app restarts mid-scan."""
     session = db.get(ScanSession, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Scan session not found")
     return session
+
+
+@router.get("/scan-sessions/{session_id}/rows", response_model=list[GroupedScanRowOut])
+def get_session_rows(
+    session_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """The live grouped table on its own — useful for re-rendering the
+    scan screen without re-fetching the whole session."""
+    session = db.get(ScanSession, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Scan session not found")
+    grouped = get_grouped_scan_rows(db, session_id)
+    return [GroupedScanRowOut(**row) for row in grouped]
+
+
+@router.post("/scan-sessions/{session_id}/complete", response_model=ScanSessionOut)
+def complete_scan_session(
+    session_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Employee marks scanning done for this invoice. This doesn't run the
+    comparison itself — it just closes the session so it stops appearing
+    as 'in progress'. Call /compare separately (before or after marking
+    complete) to see the match/mismatch report."""
+    session = db.get(ScanSession, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Scan session not found")
+    session.status = ScanSessionStatus.completed
+    session.completed_at = datetime.utcnow()
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+@router.get("/scan-sessions/{session_id}/compare", response_model=CompareResultOut)
+def compare_scan_session(
+    session_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """The 'Compare' button — reconciles everything scanned in this
+    session against the invoice's strip-type line items, matched by batch
+    number. Can be called any time, even mid-scan, to check progress —
+    doesn't require the session to be marked complete first."""
+    try:
+        result = compare_session(db, session_id)
+    except StripScanError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return result
