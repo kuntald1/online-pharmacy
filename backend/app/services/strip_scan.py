@@ -298,23 +298,83 @@ def delete_scanned_batch(db: Session, session_id: int, batch_variants: list[str]
     return deleted
 
 
-def edit_scanned_batch(db: Session, session_id: int, batch_variants: list[str], new_batch_no: str, new_exp_date: str | None) -> int:
-    """Corrects every underlying StripScanRecord in this session whose
-    extracted_batch_no is one of the given variants to a single, admin-
-    confirmed batch number (and optionally EXP date) — e.g. fixing a
-    consistently-misread batch so it now matches the invoice. Returns the
-    number of rows updated."""
-    if not batch_variants:
-        return 0
-    query = db.query(StripScanRecord).filter(
-        StripScanRecord.session_id == session_id, StripScanRecord.extracted_batch_no.in_(batch_variants)
-    )
-    update_values = {"extracted_batch_no": new_batch_no}
-    if new_exp_date is not None:
-        update_values["extracted_exp_date"] = new_exp_date
-    updated = query.update(update_values, synchronize_session=False)
-    db.commit()
-    return updated
+def edit_scanned_batch(
+    db: Session, session_id: int, employee_id: int,
+    batch_variants: list[str],
+    new_medicine_name: str | None, new_batch_no: str, new_exp_date: str | None, new_qty: int | None,
+) -> int:
+    """Full-row edit for the web admin table. Two situations, handled the
+    same way:
+
+    1. batch_variants is non-empty (this row already had scans): corrects
+       every underlying StripScanRecord's medicine/batch/exp to the
+       admin-confirmed values.
+    2. batch_variants is EMPTY (nothing scanned yet for this line item):
+       there's nothing to rename — this becomes a manual entry, letting
+       an admin record a count directly from the web without anyone
+       having scanned it on a phone at all.
+
+    In both cases, if new_qty is given and differs from the row's current
+    count, rows are added or removed to match it: added rows are tagged
+    confidence='admin_edit' so they're visibly distinguishable from a
+    real phone scan in the data, with attempts_taken=0 since no camera
+    was involved. Returns the final row count for this batch."""
+    if batch_variants:
+        query = db.query(StripScanRecord).filter(
+            StripScanRecord.session_id == session_id, StripScanRecord.extracted_batch_no.in_(batch_variants)
+        )
+        update_values = {"extracted_batch_no": new_batch_no}
+        if new_medicine_name is not None:
+            update_values["extracted_medicine_name"] = new_medicine_name
+        if new_exp_date is not None:
+            update_values["extracted_exp_date"] = new_exp_date
+        query.update(update_values, synchronize_session=False)
+        db.commit()
+        current_count = (
+            db.query(StripScanRecord)
+            .filter(StripScanRecord.session_id == session_id, StripScanRecord.extracted_batch_no == new_batch_no)
+            .count()
+        )
+    else:
+        current_count = 0
+
+    if new_qty is not None and new_qty != current_count:
+        session_row = db.query(ScanSession).filter(ScanSession.id == session_id).with_for_update().first()
+        if not session_row:
+            raise StripScanError("Scan session not found")
+
+        if new_qty > current_count:
+            to_add = new_qty - current_count
+            next_seq = len(session_row.strip_scans) + 1
+            for i in range(to_add):
+                db.add(StripScanRecord(
+                    session_id=session_id,
+                    sequence_no=next_seq + i,
+                    scanned_by_id=employee_id,
+                    image_path=None,
+                    extracted_medicine_name=new_medicine_name,
+                    extracted_batch_no=new_batch_no,
+                    extracted_exp_date=new_exp_date,
+                    confidence="admin_edit",  # distinguishes manually-added counts from real phone scans
+                    ocr_status=OcrStatus.accepted,
+                    attempts_taken=0,
+                ))
+            db.commit()
+        else:
+            to_remove = current_count - new_qty
+            excess = (
+                db.query(StripScanRecord)
+                .filter(StripScanRecord.session_id == session_id, StripScanRecord.extracted_batch_no == new_batch_no)
+                .order_by(StripScanRecord.sequence_no.desc())
+                .limit(to_remove)
+                .all()
+            )
+            for r in excess:
+                db.delete(r)
+            db.commit()
+        current_count = new_qty
+
+    return current_count
 
 
 def compare_session(db: Session, session_id: int) -> dict:

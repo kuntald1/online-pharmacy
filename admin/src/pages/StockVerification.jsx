@@ -38,6 +38,85 @@ function ScanStatusBadge({ status }) {
   );
 }
 
+// Full-row edit modal — used both to correct an existing scanned row and
+// to manually record a count for a line item nothing's been scanned for
+// yet. Uses local state seeded from the row being edited (see
+// openEditModal in the page component) rather than controlled directly
+// by parent state, since it's a self-contained form.
+function EditRowModal({ row, onSave, onCancel }) {
+  const [productName, setProductName] = useState(row.productName);
+  const [batchNo, setBatchNo] = useState(row.batchNo);
+  const [expDate, setExpDate] = useState(row.expDate);
+  const [qty, setQty] = useState(String(row.qty));
+  const [saving, setSaving] = useState(false);
+
+  async function handleSubmit() {
+    if (!batchNo.trim()) return;
+    setSaving(true);
+    await onSave({ productName: productName.trim(), batchNo: batchNo.trim(), expDate: expDate.trim(), qty: Math.max(0, parseInt(qty, 10) || 0) });
+    setSaving(false);
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl p-6 w-full max-w-md space-y-4">
+        <h3 className="text-base font-semibold text-ink">Edit scanned row</h3>
+
+        {row.isUnassigned && (
+          <div>
+            <label className="text-xs text-ink-soft block mb-1">Product / medicine name</label>
+            <input
+              className="w-full border border-border rounded-lg px-3 py-2 text-sm"
+              value={productName}
+              onChange={(e) => setProductName(e.target.value)}
+              placeholder="e.g. Metronidazole 400mg"
+            />
+          </div>
+        )}
+
+        <div>
+          <label className="text-xs text-ink-soft block mb-1">Batch no.</label>
+          <input
+            className="w-full border border-border rounded-lg px-3 py-2 text-sm"
+            value={batchNo}
+            onChange={(e) => setBatchNo(e.target.value)}
+          />
+        </div>
+
+        <div>
+          <label className="text-xs text-ink-soft block mb-1">Exp date</label>
+          <input
+            className="w-full border border-border rounded-lg px-3 py-2 text-sm"
+            value={expDate}
+            onChange={(e) => setExpDate(e.target.value)}
+            placeholder="MM/YYYY"
+          />
+        </div>
+
+        <div>
+          <label className="text-xs text-ink-soft block mb-1">Scan qty</label>
+          <input
+            type="number"
+            min="0"
+            className="w-full border border-border rounded-lg px-3 py-2 text-sm"
+            value={qty}
+            onChange={(e) => setQty(e.target.value)}
+          />
+        </div>
+
+        <div className="flex items-center justify-end gap-3 pt-2">
+          <button onClick={onCancel} className="text-sm text-ink-soft px-3 py-2" disabled={saving}>
+            Cancel
+          </button>
+          <Button onClick={handleSubmit} disabled={saving || !batchNo.trim()}>
+            {saving ? <Loader2 size={14} className="animate-spin" /> : "Save"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function StockVerification() {
   const [invoice, setInvoice] = useState(null);
   const [recentInvoices, setRecentInvoices] = useState([]);
@@ -45,6 +124,7 @@ export default function StockVerification() {
   const [openingInvoiceId, setOpeningInvoiceId] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
+  const [editingRow, setEditingRow] = useState(null);
 
   // Mobile-app scanning progress for the currently open invoice — lets an
   // admin see what's been scanned on a phone without opening the mobile
@@ -119,7 +199,14 @@ export default function StockVerification() {
   // Deletes every underlying scan that got merged into this displayed
   // row — e.g. a garbled OCR read that shouldn't count at all.
   async function handleDeleteScannedRow(batchVariants, label) {
-    if (!scanSession) return;
+    if (!scanSession) {
+      alert("Start a scan session on mobile first — nothing to delete yet.");
+      return;
+    }
+    if (!batchVariants || batchVariants.length === 0) {
+      alert("Nothing scanned for this item yet — nothing to delete.");
+      return;
+    }
     if (!window.confirm(`Delete all scans for "${label}"? This can't be undone.`)) return;
     try {
       await api.delete(`/api/stock/scan-sessions/${scanSession.id}/scanned-batch`, { batch_variants: batchVariants });
@@ -129,23 +216,41 @@ export default function StockVerification() {
     }
   }
 
-  // Corrects a consistently-misread batch number across every underlying
-  // scan merged into this row — e.g. OCR kept reading "DT2B091" but it
-  // should be "DT28091".
-  async function handleEditScannedRow(batchVariants, currentBatch) {
-    if (!scanSession) return;
-    const corrected = window.prompt("Correct batch number:", currentBatch || "");
-    if (!corrected || !corrected.trim() || corrected.trim() === currentBatch) return;
+  // Opens the full-row edit modal, prefilled with whatever's already
+  // known — either the existing scan data, or (if nothing's been
+  // scanned yet) the invoice's own expected batch/exp as a starting
+  // point for a manual entry.
+  function openEditModal({ productName, batchVariants, batchNo, expDate, qty, isUnassigned }) {
+    setEditingRow({
+      productName: productName || "",
+      batchVariants: batchVariants || [],
+      batchNo: batchNo || "",
+      expDate: expDate || "",
+      qty: qty ?? 0,
+      isUnassigned,
+    });
+  }
+
+  async function handleSaveEdit(form) {
+    if (!scanSession) {
+      alert("Start a scan session on mobile first.");
+      return;
+    }
     try {
       await api.patch(`/api/stock/scan-sessions/${scanSession.id}/scanned-batch`, {
-        batch_variants: batchVariants,
-        new_batch_no: corrected.trim(),
+        batch_variants: editingRow.batchVariants,
+        new_medicine_name: editingRow.isUnassigned ? form.productName : null,
+        new_batch_no: form.batchNo,
+        new_exp_date: form.expDate,
+        new_qty: form.qty,
       });
+      setEditingRow(null);
       await loadScanProgress(invoice.id);
     } catch (err) {
       setError(err.message);
     }
   }
+
 
   // Live-refresh — while this invoice is open, poll every 4s so an admin
   // watching the page sees mobile-app scans (from any employee) appear
@@ -333,17 +438,26 @@ export default function StockVerification() {
                       <td className="px-4 py-3 text-ink-soft">{compareRow?.attempts_taken || "—"}</td>
                       <td className="px-4 py-3 text-ink-soft">{compareRow?.scanned_by_label || "—"}</td>
                       <td className="px-4 py-3">
-                        {compareRow && compareRow.batch_variants?.length > 0 && (
+                        {item.pack_type === "strip" && (
                           <div className="flex items-center gap-2">
                             <button
-                              onClick={() => handleEditScannedRow(compareRow.batch_variants, compareRow.batch_no)}
+                              onClick={() =>
+                                openEditModal({
+                                  productName: item.product_name,
+                                  batchVariants: compareRow?.batch_variants || [],
+                                  batchNo: compareRow ? compareRow.batch_no : item.batch_no,
+                                  expDate: item.exp_date,
+                                  qty: compareRow ? compareRow.scanned_qty : 0,
+                                  isUnassigned: false,
+                                })
+                              }
                               className="text-ink-soft hover:text-teal"
-                              title="Correct the scanned batch number"
+                              title="Edit this row's scan data"
                             >
                               <Pencil size={14} />
                             </button>
                             <button
-                              onClick={() => handleDeleteScannedRow(compareRow.batch_variants, item.product_name)}
+                              onClick={() => handleDeleteScannedRow(compareRow?.batch_variants, item.product_name)}
                               className="text-ink-soft hover:text-red"
                               title="Delete this scanned batch"
                             >
@@ -358,12 +472,11 @@ export default function StockVerification() {
 
                 {/* Scanned batches that don't match ANY line item on this invoice —
                     e.g. a wrong strip got mixed into the box. Product/Pack are left
-                    blank since there's no invoice data to pull them from; assigning
-                    these to a real product is a manual step (not yet built — see
-                    note below the table). */}
+                    blank; the Edit button now lets an admin assign a real product
+                    name and correct the batch directly, if needed. */}
                 {compareResult?.unexpected_scans.map((row, idx) => (
                   <tr key={`unexpected-${idx}`} className="border-b border-border last:border-0 bg-red/5">
-                    <td className="px-4 py-3 text-ink-soft italic">— unassigned —</td>
+                    <td className="px-4 py-3 text-ink-soft italic">{row.medicine_name || "— unassigned —"}</td>
                     <td className="px-4 py-3 text-ink">{row.batch_no || "—"}</td>
                     <td className="px-4 py-3 text-ink-soft">{row.exp_date || "—"}</td>
                     <td className="px-4 py-3 text-ink-soft">—</td>
@@ -379,9 +492,18 @@ export default function StockVerification() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <button
-                          onClick={() => handleEditScannedRow(row.batch_variants, row.batch_no)}
+                          onClick={() =>
+                            openEditModal({
+                              productName: row.medicine_name,
+                              batchVariants: row.batch_variants,
+                              batchNo: row.batch_no,
+                              expDate: row.exp_date,
+                              qty: row.qty,
+                              isUnassigned: true,
+                            })
+                          }
                           className="text-ink-soft hover:text-teal"
-                          title="Correct the scanned batch number"
+                          title="Edit this row"
                         >
                           <Pencil size={14} />
                         </button>
@@ -401,6 +523,10 @@ export default function StockVerification() {
           </div>
           {error && <p className="text-red text-sm">{error}</p>}
         </div>
+      )}
+
+      {editingRow && (
+        <EditRowModal row={editingRow} onCancel={() => setEditingRow(null)} onSave={handleSaveEdit} />
       )}
     </Layout>
   );

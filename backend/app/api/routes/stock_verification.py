@@ -291,12 +291,15 @@ def edit_scanned_batch_endpoint(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    """Web-admin 'edit' action — corrects a consistently-misread batch
-    number (and optionally EXP date) across every underlying scan that
-    was merged into this row. Typical use: OCR read a batch as
-    'DT2B091' but it should be 'DT28091' — this fixes it so the row
-    correctly matches against the invoice."""
+    """Web-admin full-row edit — corrects medicine name/batch/EXP and can
+    add or remove scan count to match an admin-entered quantity. Works
+    both to fix a misread row AND to manually record a count for a line
+    item that hasn't been scanned on mobile at all yet (batch_variants
+    empty in that case)."""
     if not body.new_batch_no or not body.new_batch_no.strip():
-        raise HTTPException(status_code=400, detail="New batch number can't be empty")
-    updated = edit_scanned_batch(db, session_id, body.batch_variants, body.new_batch_no.strip(), body.new_exp_date)
-    return {"updated": updated}
+        raise HTTPException(status_code=400, detail="Batch number can't be empty")
+    final_count = edit_scanned_batch(
+        db, session_id, admin.id,
+        body.batch_variants, body.new_medicine_name, body.new_batch_no.strip(), body.new_exp_date, body.new_qty,
+    )
+    return {"qty": final_count}

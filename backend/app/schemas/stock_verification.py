@@ -131,6 +131,8 @@ class DeleteScannedBatchIn(BaseModel):
 
 
 class EditScannedBatchIn(BaseModel):
-    batch_variants: list[str]  # which underlying scans to correct
+    batch_variants: list[str] = []  # empty = this line item had no scans yet; edit becomes a manual create
+    new_medicine_name: str | None = None
     new_batch_no: str
     new_exp_date: str | None = None
+    new_qty: int | None = None  # if given and different from current count, rows are added/removed to match
