@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Upload, Loader2, FileText, ChevronRight, ScanLine } from "lucide-react";
+import { Upload, Loader2, FileText, ChevronRight, ScanLine, Pencil, Trash2 } from "lucide-react";
 import Layout from "../components/Layout";
 import Button from "../components/Button";
 import { api } from "../api/client";
@@ -113,6 +113,37 @@ export default function StockVerification() {
       setCompareResult(compare);
     } catch {
       // scanning may not have started yet, or session hasn't changed — fine either way
+    }
+  }
+
+  // Deletes every underlying scan that got merged into this displayed
+  // row — e.g. a garbled OCR read that shouldn't count at all.
+  async function handleDeleteScannedRow(batchVariants, label) {
+    if (!scanSession) return;
+    if (!window.confirm(`Delete all scans for "${label}"? This can't be undone.`)) return;
+    try {
+      await api.delete(`/api/stock/scan-sessions/${scanSession.id}/scanned-batch`, { batch_variants: batchVariants });
+      await loadScanProgress(invoice.id);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  // Corrects a consistently-misread batch number across every underlying
+  // scan merged into this row — e.g. OCR kept reading "DT2B091" but it
+  // should be "DT28091".
+  async function handleEditScannedRow(batchVariants, currentBatch) {
+    if (!scanSession) return;
+    const corrected = window.prompt("Correct batch number:", currentBatch || "");
+    if (!corrected || !corrected.trim() || corrected.trim() === currentBatch) return;
+    try {
+      await api.patch(`/api/stock/scan-sessions/${scanSession.id}/scanned-batch`, {
+        batch_variants: batchVariants,
+        new_batch_no: corrected.trim(),
+      });
+      await loadScanProgress(invoice.id);
+    } catch (err) {
+      setError(err.message);
     }
   }
 
@@ -269,6 +300,7 @@ export default function StockVerification() {
                   <th className="px-4 py-3 font-medium">Scan status</th>
                   <th className="px-4 py-3 font-medium">Scan attempt</th>
                   <th className="px-4 py-3 font-medium">User</th>
+                  <th className="px-4 py-3 font-medium"></th>
                 </tr>
               </thead>
               <tbody>
@@ -300,6 +332,26 @@ export default function StockVerification() {
                       </td>
                       <td className="px-4 py-3 text-ink-soft">{compareRow?.attempts_taken || "—"}</td>
                       <td className="px-4 py-3 text-ink-soft">{compareRow?.scanned_by_label || "—"}</td>
+                      <td className="px-4 py-3">
+                        {compareRow && compareRow.batch_variants?.length > 0 && (
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleEditScannedRow(compareRow.batch_variants, compareRow.batch_no)}
+                              className="text-ink-soft hover:text-teal"
+                              title="Correct the scanned batch number"
+                            >
+                              <Pencil size={14} />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteScannedRow(compareRow.batch_variants, item.product_name)}
+                              className="text-ink-soft hover:text-red"
+                              title="Delete this scanned batch"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
@@ -315,7 +367,8 @@ export default function StockVerification() {
                     <td className="px-4 py-3 text-ink">{row.batch_no || "—"}</td>
                     <td className="px-4 py-3 text-ink-soft">{row.exp_date || "—"}</td>
                     <td className="px-4 py-3 text-ink-soft">—</td>
-                    <td className="px-4 py-3 text-ink">{row.qty}</td>
+                    <td className="px-4 py-3 text-ink-soft">—</td>
+                    <td className="px-4 py-3 text-ink font-medium">{row.qty}</td>
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
                         Not on invoice
@@ -323,6 +376,24 @@ export default function StockVerification() {
                     </td>
                     <td className="px-4 py-3 text-ink-soft">{row.attempts_taken || "—"}</td>
                     <td className="px-4 py-3 text-ink-soft">{row.scanned_by_label || "—"}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleEditScannedRow(row.batch_variants, row.batch_no)}
+                          className="text-ink-soft hover:text-teal"
+                          title="Correct the scanned batch number"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteScannedRow(row.batch_variants, row.batch_no)}
+                          className="text-ink-soft hover:text-red"
+                          title="Delete this scanned batch"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>

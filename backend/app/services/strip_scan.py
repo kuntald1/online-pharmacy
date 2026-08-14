@@ -276,8 +276,45 @@ def get_grouped_scan_rows(db: Session, session_id: int) -> list[dict]:
             "confidence": g["confidence"],
             "attempts_taken": g["attempts_taken"],
             "scanned_by_label": g["scanned_by_label"],
+            "batch_variants": list(g["_batch_variants"].keys()),
         })
     return result
+
+
+def delete_scanned_batch(db: Session, session_id: int, batch_variants: list[str]) -> int:
+    """Deletes every underlying StripScanRecord in this session whose
+    extracted_batch_no is one of the given variants — i.e. deletes an
+    entire merged row from the web admin table in one go, not just one of
+    the several raw scans that got fuzzy-merged into it. Returns the
+    number of rows deleted."""
+    if not batch_variants:
+        return 0
+    deleted = (
+        db.query(StripScanRecord)
+        .filter(StripScanRecord.session_id == session_id, StripScanRecord.extracted_batch_no.in_(batch_variants))
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return deleted
+
+
+def edit_scanned_batch(db: Session, session_id: int, batch_variants: list[str], new_batch_no: str, new_exp_date: str | None) -> int:
+    """Corrects every underlying StripScanRecord in this session whose
+    extracted_batch_no is one of the given variants to a single, admin-
+    confirmed batch number (and optionally EXP date) — e.g. fixing a
+    consistently-misread batch so it now matches the invoice. Returns the
+    number of rows updated."""
+    if not batch_variants:
+        return 0
+    query = db.query(StripScanRecord).filter(
+        StripScanRecord.session_id == session_id, StripScanRecord.extracted_batch_no.in_(batch_variants)
+    )
+    update_values = {"extracted_batch_no": new_batch_no}
+    if new_exp_date is not None:
+        update_values["extracted_exp_date"] = new_exp_date
+    updated = query.update(update_values, synchronize_session=False)
+    db.commit()
+    return updated
 
 
 def compare_session(db: Session, session_id: int) -> dict:
@@ -328,6 +365,7 @@ def compare_session(db: Session, session_id: int) -> dict:
             "status": status,
             "attempts_taken": scanned["attempts_taken"] if scanned else 0,
             "scanned_by_label": scanned["scanned_by_label"] if scanned else None,
+            "batch_variants": scanned["batch_variants"] if scanned else [],
         })
 
     # Scanned batches that don't correspond to ANY line item on this

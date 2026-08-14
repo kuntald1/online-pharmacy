@@ -11,9 +11,13 @@ from app.models.enums import ScanSessionStatus
 from app.schemas.stock_verification import (
     InvoiceOut, InvoiceSummaryOut, ScanSessionOut, StripScanResultOut,
     GroupedScanRowOut, CompareResultOut, ManualStripScanIn,
+    DeleteScannedBatchIn, EditScannedBatchIn,
 )
 from app.services.stock_verification_extraction import extract_and_save_invoice_for_verification, StockVerificationInvoiceExtractionError
-from app.services.strip_scan import get_grouped_scan_rows, compare_session, save_manual_scan, StripScanError
+from app.services.strip_scan import (
+    get_grouped_scan_rows, compare_session, save_manual_scan,
+    delete_scanned_batch, edit_scanned_batch, StripScanError,
+)
 from app.api.deps import get_current_user, require_admin
 
 router = APIRouter(prefix="/api/stock", tags=["stock-verification"])
@@ -262,3 +266,37 @@ def compare_scan_session(
     except StripScanError as e:
         raise HTTPException(status_code=404, detail=str(e))
     return result
+
+
+@router.delete("/scan-sessions/{session_id}/scanned-batch")
+def delete_scanned_batch_endpoint(
+    session_id: int,
+    body: DeleteScannedBatchIn,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Web-admin 'delete' action on a scanned row — e.g. a garbled OCR
+    read that shouldn't count at all. batch_variants comes straight from
+    the row's own batch_variants field (see GroupedScanRowOut /
+    CompareRowOut), so this targets exactly the underlying scans that
+    were merged into that one displayed row, nothing else."""
+    deleted = delete_scanned_batch(db, session_id, body.batch_variants)
+    return {"deleted": deleted}
+
+
+@router.patch("/scan-sessions/{session_id}/scanned-batch")
+def edit_scanned_batch_endpoint(
+    session_id: int,
+    body: EditScannedBatchIn,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Web-admin 'edit' action — corrects a consistently-misread batch
+    number (and optionally EXP date) across every underlying scan that
+    was merged into this row. Typical use: OCR read a batch as
+    'DT2B091' but it should be 'DT28091' — this fixes it so the row
+    correctly matches against the invoice."""
+    if not body.new_batch_no or not body.new_batch_no.strip():
+        raise HTTPException(status_code=400, detail="New batch number can't be empty")
+    updated = edit_scanned_batch(db, session_id, body.batch_variants, body.new_batch_no.strip(), body.new_exp_date)
+    return {"updated": updated}

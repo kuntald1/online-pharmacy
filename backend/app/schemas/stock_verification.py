@@ -85,6 +85,7 @@ class GroupedScanRowOut(BaseModel):
     confidence: str | None = None
     attempts_taken: int = 0  # total capture attempts across every scan in this group — the "Scan Attempt" column
     scanned_by_label: str | None = None  # name/initial of whoever made the most recent scan in this group
+    batch_variants: list[str] = []  # every distinct raw OCR string that got fuzzy-merged into this row — needed to target Edit/Delete at exactly the right underlying records
 
 
 class ManualStripScanIn(BaseModel):
@@ -115,6 +116,7 @@ class CompareRowOut(BaseModel):
     status: str  # matched | short | excess | not_scanned
     attempts_taken: int = 0
     scanned_by_label: str | None = None
+    batch_variants: list[str] = []  # same purpose as on GroupedScanRowOut — lets the web admin Edit/Delete this row's underlying scans
 
 
 class CompareResultOut(BaseModel):
@@ -122,3 +124,13 @@ class CompareResultOut(BaseModel):
     invoice_id: int
     rows: list[CompareRowOut]
     unexpected_scans: list[GroupedScanRowOut]  # scanned batches that don't belong to any line item on this invoice
+
+
+class DeleteScannedBatchIn(BaseModel):
+    batch_variants: list[str]  # from GroupedScanRowOut/CompareRowOut.batch_variants — identifies exactly which underlying scans to remove
+
+
+class EditScannedBatchIn(BaseModel):
+    batch_variants: list[str]  # which underlying scans to correct
+    new_batch_no: str
+    new_exp_date: str | None = None
