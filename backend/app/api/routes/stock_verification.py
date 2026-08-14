@@ -113,13 +113,24 @@ def start_scan_session(
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
 
+    # Deliberately NOT filtered by status == in_progress — a session
+    # getting marked "completed" (via Finish & compare) should NOT mean
+    # scanning that invoice again starts from zero. There is exactly ONE
+    # session per invoice, ever; "completed" is just an informational
+    # marker, not a hard stop. Resuming scanning flips it back to
+    # in_progress so it's clear scanning is active again.
     existing = (
         db.query(ScanSession)
-        .filter(ScanSession.invoice_id == invoice_id, ScanSession.status == ScanSessionStatus.in_progress)
+        .filter(ScanSession.invoice_id == invoice_id)
         .order_by(ScanSession.created_at.desc())
         .first()
     )
     if existing:
+        if existing.status == ScanSessionStatus.completed:
+            existing.status = ScanSessionStatus.in_progress
+            existing.completed_at = None
+            db.commit()
+            db.refresh(existing)
         return existing
 
     session = ScanSession(invoice_id=invoice_id, employee_id=admin.id)
