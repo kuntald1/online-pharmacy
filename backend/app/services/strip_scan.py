@@ -8,6 +8,7 @@ compare_session(), not per-scan.
 """
 import base64
 import json
+from difflib import SequenceMatcher
 from pathlib import Path
 
 from anthropic import Anthropic
@@ -185,7 +186,19 @@ def get_grouped_scan_rows(db: Session, session_id: int) -> list[dict]:
     number) and counts them — this IS the 'Medicine X / Batch Y / Qty N'
     table the employee sees live while scanning. Computed fresh from the
     raw scan records every time, so it can never drift out of sync with
-    what was actually scanned."""
+    what was actually scanned.
+
+    Two passes:
+    1. Exact grouping by (medicine name, batch number) — same as before.
+    2. Fuzzy merge: OCR occasionally misreads the same physical strip's
+       batch slightly differently between attempts (e.g. "DT2B091" vs
+       "DT28091" vs "DT33091" — all the same real strip, one digit/letter
+       confused each time). Groups with a similar-enough batch string
+       (SequenceMatcher ratio >= 0.7) AND the same EXP date get merged
+       into one — medicine name is deliberately NOT part of this check
+       (see the merge loop below for why). The canonical batch number
+       shown is whichever exact reading occurred most often (the
+       most-repeated, and therefore most likely correct, OCR result)."""
     records = (
         db.query(StripScanRecord)
         .filter(StripScanRecord.session_id == session_id, StripScanRecord.ocr_status == OcrStatus.accepted)
@@ -193,33 +206,78 @@ def get_grouped_scan_rows(db: Session, session_id: int) -> list[dict]:
         .all()
     )
 
-    groups: dict[tuple[str, str], dict] = {}
+    # Pass 1 — exact grouping, same as before.
+    exact_groups: dict[tuple[str, str], dict] = {}
     for r in records:
-        # Normalize just enough to group sensibly (case/whitespace) without
-        # rewriting what was actually read off the strip.
         name_key = (r.extracted_medicine_name or "").strip().lower()
         batch_key = (r.extracted_batch_no or "").strip().lower()
         key = (name_key, batch_key)
-        if key not in groups:
-            groups[key] = {
+        if key not in exact_groups:
+            exact_groups[key] = {
+                "_name_key": name_key,
+                "_batch_variants": {},  # batch_no -> count, to pick the canonical spelling later
                 "medicine_name": r.extracted_medicine_name,
                 "batch_no": r.extracted_batch_no,
-                "mfg_date": r.extracted_mfg_date,
                 "exp_date": r.extracted_exp_date,
                 "qty": 0,
                 "confidence": r.confidence,
                 "attempts_taken": 0,
                 "scanned_by_label": None,
             }
-        groups[key]["qty"] += 1
-        groups[key]["attempts_taken"] += r.attempts_taken or 1
-        # Most-recent scanner in the group wins the displayed label —
-        # records come in sequence_no order, so the last one processed
-        # here is the most recent.
+        g = exact_groups[key]
+        g["qty"] += 1
+        g["attempts_taken"] += r.attempts_taken or 1
+        g["_batch_variants"][r.extracted_batch_no or ""] = g["_batch_variants"].get(r.extracted_batch_no or "", 0) + 1
         if r.scanned_by is not None:
-            groups[key]["scanned_by_label"] = getattr(r.scanned_by, "name", None) or getattr(r.scanned_by, "phone", None)
+            g["scanned_by_label"] = getattr(r.scanned_by, "name", None) or getattr(r.scanned_by, "phone", None)
 
-    return list(groups.values())
+    # Pass 2 — fuzzy-merge near-duplicate batch reads. Deliberately does
+    # NOT require the medicine-name guess to match — that guess is just
+    # "the longest printed line," which often grabs different boilerplate
+    # warning text on different attempts of the SAME strip (confirmed in
+    # testing: three misreads of one real strip had three different name
+    # guesses but a consistently correct EXP date). Batch similarity + a
+    # matching EXP date together are a strong enough signal on their own.
+    merged: list[dict] = []
+    for g in exact_groups.values():
+        target = None
+        for m in merged:
+            same_exp = (
+                not g["exp_date"] or not m["exp_date"]
+                or (g["exp_date"] or "").strip() == (m["exp_date"] or "").strip()
+            )
+            batch_sim = SequenceMatcher(None, (g["batch_no"] or "").lower(), (m["batch_no"] or "").lower()).ratio()
+            if same_exp and batch_sim >= 0.7:
+                target = m
+                break
+
+        if target:
+            target["qty"] += g["qty"]
+            target["attempts_taken"] += g["attempts_taken"]
+            for variant, count in g["_batch_variants"].items():
+                target["_batch_variants"][variant] = target["_batch_variants"].get(variant, 0) + count
+            if g["scanned_by_label"]:
+                target["scanned_by_label"] = g["scanned_by_label"]
+            if not target["exp_date"] and g["exp_date"]:
+                target["exp_date"] = g["exp_date"]
+        else:
+            merged.append(g)
+
+    # Pick the most-frequently-read spelling as the canonical batch number
+    # shown, and drop the internal bookkeeping fields before returning.
+    result = []
+    for g in merged:
+        canonical_batch = max(g["_batch_variants"].items(), key=lambda kv: kv[1])[0] if g["_batch_variants"] else g["batch_no"]
+        result.append({
+            "medicine_name": g["medicine_name"],
+            "batch_no": canonical_batch,
+            "exp_date": g["exp_date"],
+            "qty": g["qty"],
+            "confidence": g["confidence"],
+            "attempts_taken": g["attempts_taken"],
+            "scanned_by_label": g["scanned_by_label"],
+        })
+    return result
 
 
 def compare_session(db: Session, session_id: int) -> dict:

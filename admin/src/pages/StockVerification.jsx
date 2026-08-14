@@ -23,7 +23,7 @@ function PackTypeBadge({ type }) {
 // Mirrors the mobile app's Compare screen status styling, so an admin
 // looking at the web page and an employee looking at the phone see the
 // same colors for the same meaning.
-function ScanStatusBadge({ status, scannedQty, expectedQty }) {
+function ScanStatusBadge({ status }) {
   const styles = {
     matched: { bg: "bg-green-100", text: "text-green-800", label: "Matched" },
     short: { bg: "bg-red-100", text: "text-red-800", label: "Short" },
@@ -33,7 +33,7 @@ function ScanStatusBadge({ status, scannedQty, expectedQty }) {
   const style = styles[status] || styles.not_scanned;
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${style.bg} ${style.text}`}>
-      {style.label} ({scannedQty}/{expectedQty})
+      {style.label}
     </span>
   );
 }
@@ -265,6 +265,7 @@ export default function StockVerification() {
                   <th className="px-4 py-3 font-medium">Exp</th>
                   <th className="px-4 py-3 font-medium">Pack</th>
                   <th className="px-4 py-3 font-medium">Qty</th>
+                  <th className="px-4 py-3 font-medium">Scan Qty</th>
                   <th className="px-4 py-3 font-medium">Scan status</th>
                   <th className="px-4 py-3 font-medium">Scan attempt</th>
                   <th className="px-4 py-3 font-medium">User</th>
@@ -285,11 +286,14 @@ export default function StockVerification() {
                         <span className="text-xs text-ink-soft ml-1.5">{item.pack}</span>
                       </td>
                       <td className="px-4 py-3 text-ink">{item.qty}</td>
+                      <td className="px-4 py-3 text-ink font-medium">
+                        {item.pack_type !== "strip" ? "—" : compareRow ? compareRow.scanned_qty : 0}
+                      </td>
                       <td className="px-4 py-3">
                         {item.pack_type !== "strip" ? (
                           <span className="text-xs text-ink-soft">No scan needed</span>
                         ) : compareRow ? (
-                          <ScanStatusBadge status={compareRow.status} scannedQty={compareRow.scanned_qty} expectedQty={compareRow.expected_qty} />
+                          <ScanStatusBadge status={compareRow.status} />
                         ) : (
                           <span className="text-xs text-ink-soft">Not scanned yet</span>
                         )}
