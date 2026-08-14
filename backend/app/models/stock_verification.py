@@ -64,6 +64,7 @@ class StripScanRecord(Base):
     confidence: Mapped[str | None] = mapped_column(String(10), nullable=True)  # high | medium | low
 
     ocr_status: Mapped[OcrStatus] = mapped_column(SAEnum(OcrStatus), default=OcrStatus.accepted)
+    attempts_taken: Mapped[int] = mapped_column(Integer, default=1)  # how many camera captures the app needed before THIS strip was successfully read — shown as "Scan Attempt" in the web admin table
 
     scanned_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

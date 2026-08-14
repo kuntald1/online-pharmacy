@@ -168,6 +168,7 @@ def scan_strip_manual_endpoint(
         record = save_manual_scan(
             db, session_id, admin.id,
             body.medicine_name, body.batch_no, body.mfg_date, body.exp_date,
+            attempts_taken=body.attempts_taken,
         )
     except StripScanError as e:
         raise HTTPException(status_code=422, detail=str(e))

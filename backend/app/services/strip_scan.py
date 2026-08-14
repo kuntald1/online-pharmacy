@@ -141,6 +141,7 @@ def scan_strip(db: Session, session_id: int, employee_id: int, file_bytes: bytes
 def save_manual_scan(
     db: Session, session_id: int, employee_id: int,
     medicine_name: str | None, batch_no: str | None, mfg_date: str | None, exp_date: str | None,
+    attempts_taken: int = 1,
 ) -> StripScanRecord:
     """Saves a strip scan that was already read by the mobile app's free,
     on-device OCR (ML Kit) — this function makes NO Claude API call and
@@ -171,6 +172,7 @@ def save_manual_scan(
         extracted_exp_date=exp_date,
         confidence="on_device",  # marks this came from free OCR, not Claude, for audit clarity
         ocr_status=OcrStatus.accepted,
+        attempts_taken=max(1, attempts_taken),
     )
     db.add(record)
     db.commit()
@@ -206,8 +208,16 @@ def get_grouped_scan_rows(db: Session, session_id: int) -> list[dict]:
                 "exp_date": r.extracted_exp_date,
                 "qty": 0,
                 "confidence": r.confidence,
+                "attempts_taken": 0,
+                "scanned_by_label": None,
             }
         groups[key]["qty"] += 1
+        groups[key]["attempts_taken"] += r.attempts_taken or 1
+        # Most-recent scanner in the group wins the displayed label —
+        # records come in sequence_no order, so the last one processed
+        # here is the most recent.
+        if r.scanned_by is not None:
+            groups[key]["scanned_by_label"] = getattr(r.scanned_by, "name", None) or getattr(r.scanned_by, "phone", None)
 
     return list(groups.values())
 
@@ -258,6 +268,8 @@ def compare_session(db: Session, session_id: int) -> dict:
             "expected_qty": item.qty,
             "scanned_qty": scanned_qty,
             "status": status,
+            "attempts_taken": scanned["attempts_taken"] if scanned else 0,
+            "scanned_by_label": scanned["scanned_by_label"] if scanned else None,
         })
 
     # Scanned batches that don't correspond to ANY line item on this

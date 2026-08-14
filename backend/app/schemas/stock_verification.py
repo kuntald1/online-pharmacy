@@ -83,6 +83,8 @@ class GroupedScanRowOut(BaseModel):
     exp_date: str | None = None
     qty: int
     confidence: str | None = None
+    attempts_taken: int = 0  # total capture attempts across every scan in this group — the "Scan Attempt" column
+    scanned_by_label: str | None = None  # name/initial of whoever made the most recent scan in this group
 
 
 class ManualStripScanIn(BaseModel):
@@ -93,6 +95,7 @@ class ManualStripScanIn(BaseModel):
     batch_no: str | None = None
     mfg_date: str | None = None
     exp_date: str | None = None
+    attempts_taken: int = 1  # how many camera captures it took to get here (auto-detect retries count as one "attempt" each)
 
 
 class StripScanResultOut(BaseModel):
@@ -110,6 +113,8 @@ class CompareRowOut(BaseModel):
     expected_qty: int
     scanned_qty: int
     status: str  # matched | short | excess | not_scanned
+    attempts_taken: int = 0
+    scanned_by_label: str | None = None
 
 
 class CompareResultOut(BaseModel):

@@ -102,6 +102,31 @@ export default function StockVerification() {
     }
   }
 
+  // Silent version for the live-refresh poll below — updates state
+  // without toggling the loading spinner, so the table doesn't flicker
+  // every few seconds while an admin is watching it.
+  async function refreshScanProgressSilently(invoiceId) {
+    try {
+      const session = await api.get(`/api/stock/invoices/${invoiceId}/latest-session`);
+      setScanSession(session);
+      const compare = await api.get(`/api/stock/scan-sessions/${session.id}/compare`);
+      setCompareResult(compare);
+    } catch {
+      // scanning may not have started yet, or session hasn't changed — fine either way
+    }
+  }
+
+  // Live-refresh — while this invoice is open, poll every 4s so an admin
+  // watching the page sees mobile-app scans (from any employee) appear
+  // without needing to refresh the browser themselves.
+  useEffect(() => {
+    if (!invoice) return;
+    const interval = setInterval(() => {
+      refreshScanProgressSilently(invoice.id);
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [invoice?.id]);
+
   async function handleUpload(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -241,6 +266,8 @@ export default function StockVerification() {
                   <th className="px-4 py-3 font-medium">Pack</th>
                   <th className="px-4 py-3 font-medium">Qty</th>
                   <th className="px-4 py-3 font-medium">Scan status</th>
+                  <th className="px-4 py-3 font-medium">Scan attempt</th>
+                  <th className="px-4 py-3 font-medium">User</th>
                 </tr>
               </thead>
               <tbody>
@@ -267,9 +294,33 @@ export default function StockVerification() {
                           <span className="text-xs text-ink-soft">Not scanned yet</span>
                         )}
                       </td>
+                      <td className="px-4 py-3 text-ink-soft">{compareRow?.attempts_taken || "—"}</td>
+                      <td className="px-4 py-3 text-ink-soft">{compareRow?.scanned_by_label || "—"}</td>
                     </tr>
                   );
                 })}
+
+                {/* Scanned batches that don't match ANY line item on this invoice —
+                    e.g. a wrong strip got mixed into the box. Product/Pack are left
+                    blank since there's no invoice data to pull them from; assigning
+                    these to a real product is a manual step (not yet built — see
+                    note below the table). */}
+                {compareResult?.unexpected_scans.map((row, idx) => (
+                  <tr key={`unexpected-${idx}`} className="border-b border-border last:border-0 bg-red/5">
+                    <td className="px-4 py-3 text-ink-soft italic">— unassigned —</td>
+                    <td className="px-4 py-3 text-ink">{row.batch_no || "—"}</td>
+                    <td className="px-4 py-3 text-ink-soft">{row.exp_date || "—"}</td>
+                    <td className="px-4 py-3 text-ink-soft">—</td>
+                    <td className="px-4 py-3 text-ink">{row.qty}</td>
+                    <td className="px-4 py-3">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
+                        Not on invoice
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-ink-soft">{row.attempts_taken || "—"}</td>
+                    <td className="px-4 py-3 text-ink-soft">{row.scanned_by_label || "—"}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
